@@ -1,0 +1,44 @@
+I built a full-stack business application in 32 hours using AI-assisted development. Here's what happened.
+
+The challenge: A dairy processing business needed a system to replace manual registers. Not a toy app -- a multi-user production system tracking 4 manufacturing flows, vendor purchases with quality metrics, customer sales, 30-day running stock, financial reports, anomaly detection, and audit trails.
+
+The stack: Flutter (web + mobile) + WordPress REST API + MariaDB.
+
+What shipped:
+- 40+ Dart files, 7,500+ lines
+- 2 PHP plugins, 3,150+ lines
+- 35 REST API endpoints
+- 16 database tables
+- 8 report types with CSV export (web + mobile)
+- 52 unit and integration tests, zero analyzer warnings
+- Role-based access across multiple locations
+- Full audit logging on every data change
+
+Timeline: First commit to production deployment -- 32 hours. The git log proves it.
+
+What AI (Claude Code) changed at each SDLC stage:
+
+REQUIREMENTS: Domain knowledge in my head was extracted, structured, and formalised into a living specification in under an hour. That spec became the project's executable context -- guiding every line of code generated after it.
+
+BACKEND: 35 endpoints, all following the same validation, access control, audit logging, and error handling patterns. Endpoint #30 was just as disciplined as endpoint #1. AI doesn't get tired at 2am.
+
+FRONTEND: The killer advantage was holding both sides of the stack in context simultaneously. When I said "add vendor ledger," the AI generated the DB table, PHP endpoint, Dart controller, Flutter page, route registration, and spec update -- all consistent, all type-safe across the PHP-Dart boundary.
+
+DEBUGGING: The cycle compressed from "search, understand, fix" to just "fix." The AI already knew every file, every contract, every constraint.
+
+The honest part -- deliberate trade-offs still in the backlog:
+- No CI/CD pipeline (manual scp deployment)
+- No rate limiting or monitoring
+- No offline data entry
+
+These are prioritisation decisions in a working, tested system -- not oversights.
+
+The lesson: AI didn't replace the developer. It eliminated the mechanical overhead that dominates traditional development. The domain understanding, architecture decisions, and quality judgement still came from a human. What AI did brilliantly was apply those decisions consistently across 10,700 lines of code without drift.
+
+The future isn't AI replacing developers. It's developers with AI doing in hours what used to take weeks -- and spending the saved time on what actually matters.
+
+Full technical write-up with architecture details, code metrics, and the complete gap analysis: [LINK]
+
+Source code: [GITHUB LINK]
+
+#SoftwareEngineering #AI #ClaudeCode #Flutter #FullStack #ProductivityHack #AIAssistedDevelopment

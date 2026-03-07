@@ -1,0 +1,30 @@
+name: dairy_mgmt
+description: Dairy Production & Sales Management App
+publish_to: none
+version: 1.0.1+2
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  get: ^4.6.6
+  http: ^1.2.0
+  intl: ^0.19.0
+  flutter_secure_storage: ^9.0.0
+  connectivity_plus: ^6.0.3
+  web: ^1.1.0
+  path_provider: ^2.1.0
+  share_plus: ^10.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
