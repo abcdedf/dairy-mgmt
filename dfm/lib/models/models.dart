@@ -44,11 +44,12 @@ abstract class ProductIds {
   static const int skimMilk = 2;
   static const int cream    = 3;
   static const int butter   = 4;
-  // 5 is reserved / unused
+  static const int ghee     = 5;
   static const int dahi     = 6;
   static const int smp      = 7;
   static const int protein  = 8;
   static const int culture  = 9;
+  static const int curd     = 10;
 }
 
 // ── Production payloads ─────────────────────────────────────
@@ -231,15 +232,15 @@ class VendorMilkAvailability {
 class PouchType {
   final int id;
   final String name;
-  final double litre;
-  final double price;
+  final double milkPerPouch;
+  final int pouchesPerCrate;
   final bool isActive;
-  const PouchType({required this.id, required this.name, required this.litre, required this.price, required this.isActive});
+  const PouchType({required this.id, required this.name, required this.milkPerPouch, required this.pouchesPerCrate, required this.isActive});
   factory PouchType.fromJson(Map<String, dynamic> j) => PouchType(
     id: int.parse(j['id'].toString()),
     name: j['name'].toString(),
-    litre: double.parse(j['litre'].toString()),
-    price: double.parse(j['price'].toString()),
+    milkPerPouch: double.parse((j['milk_per_pouch'] ?? j['litre'] ?? '0').toString()),
+    pouchesPerCrate: int.tryParse((j['pouches_per_crate'] ?? '12').toString()) ?? 12,
     isActive: j['is_active'].toString() == '1',
   );
 }
@@ -248,16 +249,16 @@ class PouchType {
 class PouchStockRow {
   final int pouchTypeId;
   final String name;
-  final double litre;
-  final double price;
-  final int produced;
-  const PouchStockRow({required this.pouchTypeId, required this.name, required this.litre, required this.price, required this.produced});
+  final double milkPerPouch;
+  final int pouchesPerCrate;
+  final int crateCount;
+  const PouchStockRow({required this.pouchTypeId, required this.name, required this.milkPerPouch, required this.pouchesPerCrate, required this.crateCount});
   factory PouchStockRow.fromJson(Map<String, dynamic> j) => PouchStockRow(
     pouchTypeId: int.parse(j['pouch_type_id'].toString()),
     name: j['name'].toString(),
-    litre: double.parse(j['litre'].toString()),
-    price: double.parse(j['price'].toString()),
-    produced: int.parse(j['produced'].toString()),
+    milkPerPouch: double.parse((j['milk_per_pouch'] ?? '0').toString()),
+    pouchesPerCrate: int.tryParse((j['pouches_per_crate'] ?? '12').toString()) ?? 12,
+    crateCount: int.parse((j['crate_count'] ?? '0').toString()),
   );
 }
 

@@ -41,22 +41,43 @@ class SaleEntry {
   );
 }
 
+/// A pending sale row with its own form state.
+class PendingRow {
+  final RxnInt customerId;
+  final RxnInt productId;
+  final TextEditingController qtyCtrl;
+  final TextEditingController rateCtrl;
+
+  PendingRow({int? initialCustomerId, int? initialProductId})
+      : customerId = RxnInt(initialCustomerId),
+        productId  = RxnInt(initialProductId),
+        qtyCtrl    = TextEditingController(),
+        rateCtrl   = TextEditingController();
+
+  void dispose() {
+    qtyCtrl.dispose();
+    rateCtrl.dispose();
+  }
+}
+
 class SalesController extends GetxController {
   final isLoading           = false.obs;
   final isSaving            = false.obs;
   final products            = <DairyProduct>[].obs;
   final customers           = <Customer>[].obs;
   final entries             = <SaleEntry>[].obs;
-  final selectedProdId      = RxnInt();
-  final selectedCustomerId  = RxnInt();
+  final pendingRows         = <PendingRow>[].obs;
   final entryDate           = DateTime.now().obs;
   final errorMessage        = ''.obs;
   final successMessage      = ''.obs;
+  final formKey             = GlobalKey<FormState>();
+  final _deletableIds       = <int>{};
 
-  final qtyCtrl  = TextEditingController();
-  final rateCtrl = TextEditingController();
-  final formKey  = GlobalKey<FormState>();
-  final _deletableIds = <int>{};          // entries added this session
+  // Stock as-of selected date
+  final stockSkimMilk = RxnInt();
+  final stockCream    = RxnInt();
+  final stockCurd     = RxnInt();
+  final stockGhee     = RxnInt();
 
   String get _date => DateFormat('yyyy-MM-dd').format(entryDate.value);
   int    get dayQty   => entries.fold(0, (s, e) => s + e.quantityKg);
@@ -67,19 +88,19 @@ class SalesController extends GetxController {
   void onInit() {
     super.onInit();
     _loadInit();
-    ever(LocationService.instance.selected, (_) => fetchSales());
+    ever(LocationService.instance.selected, (_) { fetchSales(); _fetchStock(); });
   }
 
   @override
   void onClose() {
-    qtyCtrl.dispose();
-    rateCtrl.dispose();
+    for (final row in pendingRows) { row.dispose(); }
     super.onClose();
   }
 
   Future<void> _loadInit() async {
     await _loadCustomers();
     await fetchSales();
+    _fetchStock();
   }
 
   Future<void> _loadCustomers() async {
@@ -88,9 +109,6 @@ class SalesController extends GetxController {
       customers.value = (res.data as List)
           .map((e) => Customer.fromJson(e as Map<String, dynamic>))
           .toList();
-      if (customers.isNotEmpty) {
-        selectedCustomerId.value = customers.first.id;
-      }
     }
   }
 
@@ -107,8 +125,7 @@ class SalesController extends GetxController {
       errorMessage.value = res.message ?? 'Error fetching sales.';
       return;
     }
-    // Preferred dropdown order: commonly sold items first, raw/ingredient last
-    const salesOrder = <int, int>{2: 0, 5: 1, 6: 2, 4: 3, 3: 4};
+    const salesOrder = <int, int>{2: 0, 5: 1, 10: 2, 4: 3, 3: 4};
     final fallback = salesOrder.length;
     products.value = (res.data['products'] as List)
         .map((e) => DairyProduct.fromJson(e as Map<String, dynamic>))
@@ -116,46 +133,94 @@ class SalesController extends GetxController {
       ..sort((a, b) =>
           (salesOrder[a.id] ?? fallback).compareTo(
               salesOrder[b.id] ?? fallback));
-    if (products.isNotEmpty && selectedProdId.value == null) {
-      selectedProdId.value = products.first.id;
-    }
     entries.value = (res.data['entries'] as List)
         .map((e) => SaleEntry.fromJson(e as Map<String, dynamic>))
         .toList();
+
+    // Start with one blank row if none pending
+    if (pendingRows.isEmpty) addRow();
   }
 
-  Future<void> save() async {
-    if (!(formKey.currentState?.validate() ?? false)) return;
-    final locId      = LocationService.instance.locId;
-    final prodId     = selectedProdId.value;
-    final customerId = selectedCustomerId.value;
-    if (locId == null || prodId == null) return;
-    if (customerId == null) {
-      errorMessage.value = 'Please select a customer.';
+  void addRow() {
+    final defaultCust = customers.isNotEmpty ? customers.first.id : null;
+    final defaultProd = products.isNotEmpty ? products.first.id : null;
+    pendingRows.add(PendingRow(
+      initialCustomerId: defaultCust,
+      initialProductId: defaultProd,
+    ));
+  }
+
+  void removeRow(int index) {
+    if (index >= 0 && index < pendingRows.length) {
+      pendingRows[index].dispose();
+      pendingRows.removeAt(index);
+    }
+  }
+
+  /// Save all non-empty pending rows to the server.
+  Future<void> saveAll() async {
+    // Collect rows that have qty filled
+    final toSave = <PendingRow>[];
+    for (final row in pendingRows) {
+      final qty = int.tryParse(row.qtyCtrl.text) ?? 0;
+      if (qty > 0 && row.customerId.value != null && row.productId.value != null) {
+        toSave.add(row);
+      }
+    }
+    if (toSave.isEmpty) {
+      errorMessage.value = 'Fill in at least one row with qty > 0.';
       return;
     }
+
+    // Validate rates
+    for (final row in toSave) {
+      final rate = double.tryParse(row.rateCtrl.text) ?? 0.0;
+      if (rate < 0) {
+        errorMessage.value = 'Rate must be >= 0.';
+        return;
+      }
+    }
+
+    final locId = LocationService.instance.locId;
+    if (locId == null) return;
+
     isSaving.value       = true;
     errorMessage.value   = '';
     successMessage.value = '';
-    final res = await ApiClient.post('/sales', {
-      'location_id': locId,
-      'entry_date':  _date,
-      'product_id':  prodId,
-      'customer_id': customerId,
-      'quantity_kg': int.tryParse(qtyCtrl.text) ?? 0,
-      'rate':        double.tryParse(rateCtrl.text) ?? 0.0,
-    });
-    isSaving.value = false;
-    if (res.ok) {
-      successMessage.value = 'Saved.';
-      qtyCtrl.clear();
-      rateCtrl.clear();
-      final newId = res.data['id'];
-      if (newId != null) _deletableIds.add(int.parse(newId.toString()));
-      await fetchSales(keepDeletable: true);
-    } else {
-      errorMessage.value = res.message ?? 'Save failed.';
+
+    int saved = 0;
+    String? firstError;
+    for (final row in toSave) {
+      final res = await ApiClient.post('/sales', {
+        'location_id': locId,
+        'entry_date':  _date,
+        'product_id':  row.productId.value,
+        'customer_id': row.customerId.value,
+        'quantity_kg': int.tryParse(row.qtyCtrl.text) ?? 0,
+        'rate':        double.tryParse(row.rateCtrl.text) ?? 0.0,
+      });
+      if (res.ok) {
+        saved++;
+        final newId = res.data['id'];
+        if (newId != null) _deletableIds.add(int.parse(newId.toString()));
+      } else {
+        firstError ??= res.message ?? 'Failed.';
+      }
     }
+
+    isSaving.value = false;
+
+    // Clear pending rows and add one fresh blank
+    for (final row in pendingRows) { row.dispose(); }
+    pendingRows.clear();
+
+    if (firstError != null) {
+      errorMessage.value = '$saved saved, error: $firstError';
+    } else {
+      successMessage.value = '$saved sale${saved > 1 ? 's' : ''} saved.';
+    }
+    await fetchSales(keepDeletable: true);
+    _fetchStock();
   }
 
   Future<void> deleteEntry(int id) async {
@@ -181,6 +246,36 @@ class SalesController extends GetxController {
     if (picked != null) {
       entryDate.value = picked;
       await fetchSales();
+      _fetchStock();
     }
+  }
+
+  Future<void> _fetchStock() async {
+    final locId = LocationService.instance.locId;
+    if (locId == null) return;
+    final date = _date;
+    final from = DateFormat('yyyy-MM-dd')
+        .format(DateTime.parse(date).subtract(const Duration(days: 29)));
+    final res = await ApiClient.get(
+        '/stock?location_id=$locId&from=$from&to=$date');
+    if (!res.ok) return;
+    final dates = res.data['dates'] as List?;
+    if (dates == null || dates.isEmpty) {
+      stockSkimMilk.value = null;
+      stockCream.value    = null;
+      stockCurd.value     = null;
+      stockGhee.value     = null;
+      return;
+    }
+    final last   = dates.last as Map<String, dynamic>;
+    final stocks = last['stocks'] as Map<String, dynamic>? ?? {};
+    int? val(int id) {
+      final v = stocks[id.toString()];
+      return v == null ? null : num.tryParse(v.toString())?.toInt();
+    }
+    stockSkimMilk.value = val(ProductIds.skimMilk);
+    stockCream.value    = val(ProductIds.cream);
+    stockCurd.value     = val(ProductIds.curd);
+    stockGhee.value     = val(ProductIds.ghee);
   }
 }

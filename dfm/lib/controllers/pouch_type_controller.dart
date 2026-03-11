@@ -30,13 +30,13 @@ class PouchTypeController extends GetxController {
     isLoading.value = false;
   }
 
-  Future<bool> savePouchType(String name, double litre, double price) async {
+  Future<bool> savePouchType(String name, double milkPerPouch, int pouchesPerCrate) async {
     errorMessage.value = '';
     successMessage.value = '';
     final res = await ApiClient.post('/pouch-types', {
       'name': name,
-      'litre': litre,
-      'price': price,
+      'milk_per_pouch': milkPerPouch,
+      'pouches_per_crate': pouchesPerCrate,
     });
     if (res.ok) {
       successMessage.value = 'Pouch type added.';
@@ -47,13 +47,13 @@ class PouchTypeController extends GetxController {
     return false;
   }
 
-  Future<bool> updatePouchType(int id, {String? name, double? litre, double? price, int? isActive}) async {
+  Future<bool> updatePouchType(int id, {String? name, double? milkPerPouch, int? pouchesPerCrate, int? isActive}) async {
     errorMessage.value = '';
     successMessage.value = '';
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
-    if (litre != null) body['litre'] = litre;
-    if (price != null) body['price'] = price;
+    if (milkPerPouch != null) body['milk_per_pouch'] = milkPerPouch;
+    if (pouchesPerCrate != null) body['pouches_per_crate'] = pouchesPerCrate;
     if (isActive != null) body['is_active'] = isActive;
     final res = await ApiClient.post('/pouch-types/$id', body);
     if (res.ok) {

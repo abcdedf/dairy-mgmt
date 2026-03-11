@@ -6,12 +6,30 @@ import '../controllers/pouch_type_controller.dart';
 import '../models/models.dart';
 import 'shared_widgets.dart';
 
-class PouchTypePage extends StatelessWidget {
+class PouchTypePage extends StatefulWidget {
   const PouchTypePage({super.key});
+  @override
+  State<PouchTypePage> createState() => _PouchTypePageState();
+}
+
+class _PouchTypePageState extends State<PouchTypePage> {
+  late final PouchTypeController ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    Get.delete<PouchTypeController>(force: true);
+    ctrl = Get.put(PouchTypeController());
+  }
+
+  @override
+  void dispose() {
+    Get.delete<PouchTypeController>(force: true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = Get.put(PouchTypeController());
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pouch Types', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
@@ -51,9 +69,9 @@ class PouchTypePage extends StatelessWidget {
   }
 
   void _showAddDialog(BuildContext context, PouchTypeController ctrl) {
-    final nameCtrl  = TextEditingController();
-    final litreCtrl = TextEditingController();
-    final priceCtrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+    final milkCtrl = TextEditingController();
+    final ppcCtrl  = TextEditingController();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -62,22 +80,22 @@ class PouchTypePage extends StatelessWidget {
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: nameCtrl, decoration: fieldDec('Name')),
           const SizedBox(height: 12),
-          TextField(controller: litreCtrl, decoration: fieldDec('Litre', suffix: 'L'),
+          TextField(controller: milkCtrl, decoration: fieldDec('Milk per Pouch', suffix: 'L'),
               keyboardType: const TextInputType.numberWithOptions(decimal: true)),
           const SizedBox(height: 12),
-          TextField(controller: priceCtrl, decoration: fieldDec('Price', suffix: 'INR'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+          TextField(controller: ppcCtrl, decoration: fieldDec('Pouches per Crate'),
+              keyboardType: TextInputType.number),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kNavy, foregroundColor: Colors.white),
             onPressed: () async {
-              final name  = nameCtrl.text.trim();
-              final litre = double.tryParse(litreCtrl.text) ?? 0;
-              final price = double.tryParse(priceCtrl.text) ?? 0;
-              if (name.isEmpty || litre <= 0) return;
-              final ok = await ctrl.savePouchType(name, litre, price);
+              final name = nameCtrl.text.trim();
+              final milk = double.tryParse(milkCtrl.text) ?? 0;
+              final ppc  = int.tryParse(ppcCtrl.text) ?? 0;
+              if (name.isEmpty || milk <= 0 || ppc <= 0) return;
+              final ok = await ctrl.savePouchType(name, milk, ppc);
               if (ok && context.mounted) Navigator.pop(context);
             },
             child: const Text('Save'),
@@ -108,7 +126,7 @@ class _PouchTypeCard extends StatelessWidget {
           child: const Icon(Icons.local_drink_outlined, color: kNavy, size: 22),
         ),
         title: Text(pt.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        subtitle: Text('${pt.litre} L  |  INR ${pt.price.toStringAsFixed(2)}',
+        subtitle: Text('${pt.milkPerPouch} L/pouch  |  ${pt.pouchesPerCrate} per crate',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (!pt.isActive)
@@ -127,9 +145,9 @@ class _PouchTypeCard extends StatelessWidget {
   }
 
   void _showEditDialog(BuildContext context) {
-    final nameCtrl  = TextEditingController(text: pt.name);
-    final litreCtrl = TextEditingController(text: pt.litre.toString());
-    final priceCtrl = TextEditingController(text: pt.price.toString());
+    final nameCtrl = TextEditingController(text: pt.name);
+    final milkCtrl = TextEditingController(text: pt.milkPerPouch.toString());
+    final ppcCtrl  = TextEditingController(text: pt.pouchesPerCrate.toString());
     var active = pt.isActive;
     showDialog(
       context: context,
@@ -140,11 +158,11 @@ class _PouchTypeCard extends StatelessWidget {
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(controller: nameCtrl, decoration: fieldDec('Name')),
             const SizedBox(height: 12),
-            TextField(controller: litreCtrl, decoration: fieldDec('Litre', suffix: 'L'),
+            TextField(controller: milkCtrl, decoration: fieldDec('Milk per Pouch', suffix: 'L'),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true)),
             const SizedBox(height: 12),
-            TextField(controller: priceCtrl, decoration: fieldDec('Price', suffix: 'INR'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+            TextField(controller: ppcCtrl, decoration: fieldDec('Pouches per Crate'),
+                keyboardType: TextInputType.number),
             const SizedBox(height: 12),
             SwitchListTile(
               title: const Text('Active', style: TextStyle(fontSize: 14)),
@@ -161,8 +179,8 @@ class _PouchTypeCard extends StatelessWidget {
                 final ok = await ctrl.updatePouchType(
                   pt.id,
                   name: nameCtrl.text.trim(),
-                  litre: double.tryParse(litreCtrl.text),
-                  price: double.tryParse(priceCtrl.text),
+                  milkPerPouch: double.tryParse(milkCtrl.text),
+                  pouchesPerCrate: int.tryParse(ppcCtrl.text),
                   isActive: active ? 1 : 0,
                 );
                 if (ok && context.mounted) Navigator.pop(context);

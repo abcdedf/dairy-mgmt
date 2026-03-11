@@ -27,7 +27,11 @@ enum DataEntry {
   smpPurchase(
       'SMP / Protein / Culture Purchase', Icons.science_outlined),
   dahiProcessing(
-      'Dahi Production',        Icons.set_meal_outlined);
+      'Dahi Production',        Icons.set_meal_outlined),
+  curdProduction(
+      'FF Milk → Cream + Curd',  Icons.soup_kitchen_outlined),
+  madhusudanSale(
+      'FF Milk → Madhusudan',   Icons.sell_outlined);
 
   final String   label;
   final IconData icon;
@@ -37,6 +41,40 @@ enum DataEntry {
 // Kept for backward compatibility with NavigationService / stock page
 enum DairyFlow { milkCream, creamButterGhee, butterGhee, dahi }
 
+// Maps server-side flow keys to DataEntry enum values
+const _keyToEntry = <String, DataEntry>{
+  'ff_milk_purchase':   DataEntry.ffMilkPurchase,
+  'ff_milk_processing': DataEntry.ffMilkProcessing,
+  'pouch_production':   DataEntry.pouchProduction,
+  'cream_purchase':     DataEntry.creamPurchase,
+  'cream_processing':   DataEntry.creamProcessing,
+  'butter_purchase':    DataEntry.butterPurchase,
+  'butter_processing':  DataEntry.butterProcessing,
+  'smp_purchase':       DataEntry.smpPurchase,
+  'dahi_processing':    DataEntry.dahiProcessing,
+  'curd_production':    DataEntry.curdProduction,
+  'madhusudan_sale':    DataEntry.madhusudanSale,
+};
+
+class FlowDef {
+  final String key;
+  final String label;
+  final int sortOrder;
+  final DataEntry? entry;
+
+  const FlowDef({required this.key, required this.label, required this.sortOrder, this.entry});
+
+  factory FlowDef.fromJson(Map<String, dynamic> j) {
+    final key = j['key'] as String;
+    return FlowDef(
+      key: key,
+      label: j['label'] as String,
+      sortOrder: int.tryParse(j['sort_order'].toString()) ?? 0,
+      entry: _keyToEntry[key],
+    );
+  }
+}
+
 // TODO(refactor): Consider decomposing per-flow logic into separate strategy
 // objects or sub-controllers when the number of flows grows or unit testing
 // becomes necessary.
@@ -45,6 +83,8 @@ class ProductionController extends GetxController {
   final vendors           = <Vendor>[].obs;
   final selectedVendorId  = RxnInt();
   final isLoading         = false.obs;
+  final flowDefs          = <FlowDef>[].obs;
+  final isFlowsLoading    = true.obs;
   final entryDate         = DateTime.now().obs;
   final selectedEntry     = DataEntry.ffMilkPurchase.obs;
   final errorMessage      = ''.obs;
@@ -59,6 +99,7 @@ class ProductionController extends GetxController {
   final stockSmp     = RxnInt(); // ProductIds.smp
   final stockProtein = RxnInt(); // ProductIds.protein
   final stockCulture = RxnInt(); // ProductIds.culture
+  final stockCurd    = RxnInt(); // ProductIds.curd
 
   final formKey = GlobalKey<FormState>();
 
@@ -110,6 +151,14 @@ class ProductionController extends GetxController {
   final pouchCreamOutCtrl = TextEditingController();
   final pouchCreamFatCtrl = TextEditingController();
 
+  // ── Flow: FF Milk → Cream + Curd ──────────────────────
+  final curdCreamOutCtrl = TextEditingController();
+  final curdCreamFatCtrl = TextEditingController();
+  final curdOutCtrl      = TextEditingController();
+
+  // ── Madhusudan Sale ───────────────────────────────────────
+  final madhusudanRateCtrl = TextEditingController();
+
   // ── Shared: vendor milk picker state ────────────────────────
   final milkAvailability   = <VendorMilkAvailability>[].obs;
   final isLoadingAvail     = false.obs;
@@ -135,6 +184,8 @@ class ProductionController extends GetxController {
     dahiSkimMilkCtrl, dahiSmpCtrl, dahiProteinCtrl, dahiCultureCtrl,
     dahiContainerCtrl, dahiSealCtrl, dahiOutCtrl,
     pouchCreamOutCtrl, pouchCreamFatCtrl,
+    madhusudanRateCtrl,
+    curdCreamOutCtrl, curdCreamFatCtrl, curdOutCtrl,
   ];
 
   Map<DataEntry, List<TextEditingController>> get _entryFields => {
@@ -152,6 +203,8 @@ class ProductionController extends GetxController {
                                   dahiCultureCtrl, dahiContainerCtrl,
                                   dahiSealCtrl, dahiOutCtrl],
     DataEntry.pouchProduction:  [pouchCreamOutCtrl, pouchCreamFatCtrl],
+    DataEntry.curdProduction:   [curdCreamOutCtrl, curdCreamFatCtrl, curdOutCtrl],
+    DataEntry.madhusudanSale:   [madhusudanRateCtrl],
   };
 
   // POST endpoint for writing new records.
@@ -166,6 +219,8 @@ class ProductionController extends GetxController {
     DataEntry.smpPurchase      => '/smp-purchase',
     DataEntry.dahiProcessing   => '/dahi',
     DataEntry.pouchProduction  => '/pouch-production',
+    DataEntry.curdProduction   => '/curd-production',
+    DataEntry.madhusudanSale   => '/madhusudan-sale',
   };
 
   @override
@@ -178,15 +233,16 @@ class ProductionController extends GetxController {
     }
     _loadVendors();
     _fetchPouchTypes();
+    _fetchFlows();
     ever(LocationService.instance.selected, (_) {
       _loadVendors();
       _fetchStock();
       _fetchMilkAvailability();
     });
-    ever(entryDate, (_) => _fetchStock());
+    ever(entryDate, (_) { _fetchStock(); _fetchMilkAvailability(); });
     ever(selectedEntry, (_) {
       _fetchStock();
-      if (_.name == 'ffMilkProcessing' || _.name == 'pouchProduction') {
+      if (_.name == 'ffMilkProcessing' || _.name == 'pouchProduction' || _.name == 'madhusudanSale' || _.name == 'curdProduction') {
         _fetchMilkAvailability();
       }
     });
@@ -224,13 +280,31 @@ class ProductionController extends GetxController {
     _fetchStock();
   }
 
+  // ── Fetch production flow definitions from server ────────────
+
+  Future<void> _fetchFlows() async {
+    isFlowsLoading.value = true;
+    final res = await ApiClient.get('/production-flows');
+    if (res.ok) {
+      flowDefs.value = (res.data as List)
+          .map((e) => FlowDef.fromJson(e as Map<String, dynamic>))
+          .where((f) => f.entry != null)
+          .toList();
+      // If the currently selected entry is no longer in the list, reset to first
+      if (flowDefs.isNotEmpty && !flowDefs.any((f) => f.entry == selectedEntry.value)) {
+        selectedEntry.value = flowDefs.first.entry!;
+      }
+    }
+    isFlowsLoading.value = false;
+  }
+
   // ── Milk availability per vendor ──────────────────────────────
 
   Future<void> _fetchMilkAvailability() async {
     final locId = LocationService.instance.locId;
     if (locId == null) return;
     isLoadingAvail.value = true;
-    final res = await ApiClient.get('/milk-availability?location_id=$locId');
+    final res = await ApiClient.get('/milk-availability?location_id=$locId&as_of=$_date');
     if (res.ok) {
       milkAvailability.value = (res.data as List)
           .map((e) => VendorMilkAvailability.fromJson(e as Map<String, dynamic>))
@@ -316,6 +390,7 @@ class ProductionController extends GetxController {
       stockSmp.value      = null;
       stockProtein.value  = null;
       stockCulture.value  = null;
+      stockCurd.value     = null;
       return;
     }
     final last   = dates.last as Map<String, dynamic>;
@@ -332,6 +407,7 @@ class ProductionController extends GetxController {
     stockSmp.value      = val(ProductIds.smp);
     stockProtein.value  = val(ProductIds.protein);
     stockCulture.value  = val(ProductIds.culture);
+    stockCurd.value     = val(ProductIds.curd);
   }
 
   // ── Save ──────────────────────────────────────────────────────
@@ -459,15 +535,47 @@ class ProductionController extends GetxController {
         for (final row in pouchLineRows) {
           final ptId = row['pouch_type_id'] as int?;
           final qty  = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
-          if (ptId != null && qty > 0) plList.add({'pouch_type_id': ptId, 'quantity': qty});
+          if (ptId != null && qty > 0) plList.add({'pouch_type_id': ptId, 'crate_count': qty});
         }
-        if (plList.isEmpty) { errorMessage.value = 'Add at least one pouch type with quantity.'; isLoading.value = false; return; }
+        if (plList.isEmpty) { errorMessage.value = 'Add at least one pouch type with crate count.'; isLoading.value = false; return; }
         payload = {
           'location_id': locId, 'entry_date': _date,
           'output_cream_kg': int.tryParse(pouchCreamOutCtrl.text) ?? 0,
           'output_cream_fat': double.tryParse(pouchCreamFatCtrl.text) ?? 0,
           'milk_usage': muList,
           'pouch_lines': plList,
+        };
+
+      case DataEntry.curdProduction:
+        final muList = <Map<String, dynamic>>[];
+        for (final row in milkUsageRows) {
+            final vid = row['vendor_id'] as int?;
+            final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
+            if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
+        }
+        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        payload = {
+            'location_id': locId, 'entry_date': _date,
+            'output_cream_kg': int.tryParse(curdCreamOutCtrl.text) ?? 0,
+            'output_cream_fat': double.tryParse(curdCreamFatCtrl.text) ?? 0,
+            'output_curd_matka': int.tryParse(curdOutCtrl.text) ?? 0,
+            'milk_usage': muList,
+        };
+
+      case DataEntry.madhusudanSale:
+        final muList = <Map<String, dynamic>>[];
+        for (final row in milkUsageRows) {
+          final vid = row['vendor_id'] as int?;
+          final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
+          if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
+        }
+        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        final saleRate = double.tryParse(madhusudanRateCtrl.text) ?? 0;
+        if (saleRate <= 0) { errorMessage.value = 'Madhusudan Rate must be greater than 0.'; isLoading.value = false; return; }
+        payload = {
+          'location_id': locId, 'entry_date': _date,
+          'sale_rate': saleRate,
+          'milk_usage': muList,
         };
     }
 

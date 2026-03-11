@@ -51,17 +51,13 @@ class DairyApp extends StatelessWidget {
       builder: (context, child) {
         return Container(
           color: const Color(AppConfig.surroundColorHex),
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: AppConfig.maxAppWidth),
-            child: child!,
-          ),
+          child: child!,
         );
       },
       initialRoute: '/',
       getPages: [
-        GetPage(name: '/',      page: () => const SplashPage()),
-        GetPage(name: '/login', page: () => const LoginPage()),
+        GetPage(name: '/',      page: () => const MobileFormFactor(child: SplashPage())),
+        GetPage(name: '/login', page: () => const MobileFormFactor(child: LoginPage())),
         GetPage(name: '/home',  page: () => const AppShell(),
             middlewares: [_AuthGuard()]),
       ],
@@ -104,28 +100,28 @@ class _PageDef {
 const List<_PageDef> _allPages = [
   _PageDef(
     key:        'production',
-    page:       ProductionPage(),
+    page:       MobileFormFactor(child: ProductionPage()),
     label:      'Production',
     icon:       Icons.factory_outlined,
     activeIcon: Icons.factory,
   ),
   _PageDef(
     key:        'sales',
-    page:       SalesPage(),
+    page:       MobileFormFactor(child: SalesPage()),
     label:      'Sales',
     icon:       Icons.store_outlined,
     activeIcon: Icons.store,
   ),
   _PageDef(
     key:        'reports',
-    page:       ReportsMenuPage(),
+    page:       MobileFormFactor(child: ReportsMenuPage()),
     label:      'Reports',
     icon:       Icons.assessment_outlined,
     activeIcon: Icons.assessment,
   ),
   _PageDef(
     key:        'anomalies',
-    page:       AnomalyPage(),
+    page:       MobileFormFactor(child: AnomalyPage()),
     label:      'Anomalies',
     icon:       Icons.warning_amber_outlined,
     activeIcon: Icons.warning_amber,

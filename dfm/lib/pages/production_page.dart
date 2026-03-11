@@ -53,23 +53,41 @@ class _ProductionBody extends StatelessWidget {
               const SizedBox(height: 12),
 
               // ── Data type dropdown ───────────────────────────
-              DCard(child: Obx(() => DropdownButtonFormField<DataEntry>(
-                initialValue: ctrl.selectedEntry.value,
-                isExpanded: true,
-                decoration: fieldDec('Data',
-                    prefixIcon: Icons.edit_note_outlined),
-                items: DataEntry.values.map((e) => DropdownMenuItem(
-                  value: e,
-                  child: Text(
-                    e.label,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                )).toList(),
-                onChanged: (v) {
-                  if (v != null) ctrl.selectedEntry.value = v;
-                },
-              ))),
+              DCard(child: Obx(() {
+                final flows = ctrl.flowDefs;
+                if (flows.isEmpty) {
+                  return DropdownButtonFormField<DataEntry>(
+                    initialValue: ctrl.selectedEntry.value,
+                    isExpanded: true,
+                    decoration: fieldDec('Data',
+                        prefixIcon: Icons.edit_note_outlined),
+                    items: DataEntry.values.map((e) => DropdownMenuItem(
+                      value: e,
+                      child: Text(e.label,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13)),
+                    )).toList(),
+                    onChanged: (v) {
+                      if (v != null) ctrl.selectedEntry.value = v;
+                    },
+                  );
+                }
+                return DropdownButtonFormField<DataEntry>(
+                  initialValue: ctrl.selectedEntry.value,
+                  isExpanded: true,
+                  decoration: fieldDec('Data',
+                      prefixIcon: Icons.edit_note_outlined),
+                  items: flows.map((f) => DropdownMenuItem(
+                    value: f.entry,
+                    child: Text(f.label,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)),
+                  )).toList(),
+                  onChanged: (v) {
+                    if (v != null) ctrl.selectedEntry.value = v;
+                  },
+                );
+              })),
 
               const SizedBox(height: 16),
 
@@ -313,6 +331,31 @@ class _EntryForm extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _PouchLinePicker(ctrl: ctrl),
+        ];
+
+      case DataEntry.curdProduction:
+        return [
+          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
+          const SizedBox(height: 10),
+          _VendorMilkPicker(ctrl: ctrl),
+          const SizedBox(height: 12),
+          Row2(
+            IntField(ctrl.curdCreamOutCtrl, 'Cream Out', 'KG'),
+            SnfFatField(ctrl.curdCreamFatCtrl, 'Cream Fat'),
+          ),
+          const SizedBox(height: 12),
+          _StockBadge(stock: ctrl.stockCurd, label: 'Curd in stock', unit: 'Matka'),
+          const SizedBox(height: 10),
+          IntField(ctrl.curdOutCtrl, 'Curd Out', 'Matka'),
+        ];
+
+      case DataEntry.madhusudanSale:
+        return [
+          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
+          const SizedBox(height: 10),
+          _VendorMilkPicker(ctrl: ctrl),
+          const SizedBox(height: 12),
+          RateField(ctrl.madhusudanRateCtrl, 'Madhusudan Rate'),
         ];
 
       case DataEntry.dahiProcessing:
@@ -665,7 +708,7 @@ class _PouchLinePicker extends StatelessWidget {
                       decoration: fieldDec('Pouch Type', isDense: true),
                       items: availTypes.map((t) => DropdownMenuItem(
                         value: t.id,
-                        child: Text('${t.name} (${t.litre}L)',
+                        child: Text('${t.name} (${t.milkPerPouch}L)',
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 12)),
                       )).toList(),
@@ -683,7 +726,7 @@ class _PouchLinePicker extends StatelessWidget {
                     flex: 2,
                     child: TextFormField(
                       controller: row['ctrl'] as TextEditingController,
-                      decoration: fieldDec('Qty (pcs)', isDense: true),
+                      decoration: fieldDec('Crates', isDense: true),
                       keyboardType: TextInputType.number,
                       validator: (v) {
                         if (v == null || v.isEmpty) return 'Required';

@@ -9,14 +9,31 @@ import 'shared_widgets.dart';
 
 const _kTeal = Color(0xFF00897B);
 
-class VendorLedgerPage extends StatelessWidget {
+class VendorLedgerPage extends StatefulWidget {
   const VendorLedgerPage({super.key});
+  @override
+  State<VendorLedgerPage> createState() => _VendorLedgerPageState();
+}
+
+class _VendorLedgerPageState extends State<VendorLedgerPage> {
+  late final VendorLedgerController ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    Get.delete<VendorLedgerController>(force: true);
+    ctrl = Get.put(VendorLedgerController());
+  }
+
+  @override
+  void dispose() {
+    Get.delete<VendorLedgerController>(force: true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ctrl   = Get.put(VendorLedgerController());
     final inrFmt = NumberFormat('#,##,##0.00', 'en_IN');
-    ctrl.fetchLedger();
 
     return Scaffold(
       appBar: AppBar(

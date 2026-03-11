@@ -8,12 +8,30 @@ import '../controllers/stock_valuation_controller.dart';
 import '../core/csv_export.dart';
 import 'shared_widgets.dart';
 
-class StockValuationPage extends StatelessWidget {
+class StockValuationPage extends StatefulWidget {
   const StockValuationPage({super.key});
+  @override
+  State<StockValuationPage> createState() => _StockValuationPageState();
+}
+
+class _StockValuationPageState extends State<StockValuationPage> {
+  late final StockValuationController ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    Get.delete<StockValuationController>(force: true);
+    ctrl = Get.put(StockValuationController());
+  }
+
+  @override
+  void dispose() {
+    Get.delete<StockValuationController>(force: true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ctrl   = Get.put(StockValuationController());
     final inrFmt = NumberFormat('#,##,##0.00', 'en_IN');
 
     return Scaffold(

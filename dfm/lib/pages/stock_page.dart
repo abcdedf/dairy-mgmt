@@ -7,13 +7,30 @@ import '../controllers/stock_controller.dart';
 import '../core/csv_export.dart';
 import 'shared_widgets.dart';
 
-class StockPage extends StatelessWidget {
+class StockPage extends StatefulWidget {
   const StockPage({super.key});
+  @override
+  State<StockPage> createState() => _StockPageState();
+}
+
+class _StockPageState extends State<StockPage> {
+  late final StockController ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    Get.delete<StockController>(force: true);
+    ctrl = Get.put(StockController());
+  }
+
+  @override
+  void dispose() {
+    Get.delete<StockController>(force: true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = Get.put(StockController());
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Stock'),
@@ -118,10 +135,12 @@ class _StockGrid extends StatefulWidget {
 class _StockGridState extends State<_StockGrid> {
   // Shared controller keeps header and body in horizontal sync
   final _hScroll = ScrollController();
+  final _vScroll = ScrollController();
 
   @override
   void dispose() {
     _hScroll.dispose();
+    _vScroll.dispose();
     super.dispose();
   }
 
@@ -171,44 +190,57 @@ class _StockGridState extends State<_StockGrid> {
         ),
 
         // ── Scrollable body ────────────────────────────────────
-        // _SyncedHorizontalBody owns the horizontal ScrollController
-        // and mirrors it to _hScroll so the frozen header stays in sync.
+        // Horizontal scroll is the outer layer so its scrollbar
+        // stays at the viewport bottom regardless of vertical overflow.
+        // Vertical scroll is inside, constrained to the available height.
         Expanded(
-          child: SyncedHorizontalBody(
-            hScroll: _hScroll,
-            gridWidth: gridW,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.vertical,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: List.generate(days.length, (i) {
-                  final day = days[i];
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(children: [
-                        _cell(
-                          dateFmt.format(DateTime.parse(day.date)),
-                          dateW, rowH,
-                          isBold: true,
-                        ),
-                        ...products.map((p) {
-                          final val   = day.stocks[p.id] ?? 0;
-                          final isNeg = val < 0;
-                          return _cell(
-                            val.toString(), colW, rowH,
-                            textColor: isNeg ? kRed : null,
-                            bgColor: isNeg ? kRed.withValues(alpha: 0.08) : null,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SyncedHorizontalBody(
+                hScroll: _hScroll,
+                gridWidth: gridW,
+                child: SizedBox(
+                  height: constraints.maxHeight,
+                  child: Scrollbar(
+                    thumbVisibility: true,
+                    controller: _vScroll,
+                    child: SingleChildScrollView(
+                      controller: _vScroll,
+                      scrollDirection: Axis.vertical,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: List.generate(days.length, (i) {
+                          final day = days[i];
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(children: [
+                                _cell(
+                                  dateFmt.format(DateTime.parse(day.date)),
+                                  dateW, rowH,
+                                  isBold: true,
+                                ),
+                                ...products.map((p) {
+                                  final val   = day.stocks[p.id] ?? 0;
+                                  final isNeg = val < 0;
+                                  return _cell(
+                                    val.toString(), colW, rowH,
+                                    textColor: isNeg ? kRed : null,
+                                    bgColor: isNeg ? kRed.withValues(alpha: 0.08) : null,
+                                  );
+                                }),
+                              ]),
+                              if (i < days.length - 1)
+                                Divider(height: 1, color: Colors.grey.shade200),
+                            ],
                           );
                         }),
-                      ]),
-                      if (i < days.length - 1)
-                        Divider(height: 1, color: Colors.grey.shade200),
-                    ],
-                  );
-                }),
-              ),
-            ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],

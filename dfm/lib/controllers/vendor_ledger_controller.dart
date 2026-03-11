@@ -82,6 +82,12 @@ class VendorLedgerController extends GetxController {
 
   final _fmt = DateFormat('yyyy-MM-dd');
 
+  @override
+  void onInit() {
+    super.onInit();
+    fetchLedger();
+  }
+
   Future<void> fetchLedger() async {
     isLoading.value    = true;
     errorMessage.value = '';

@@ -6,7 +6,11 @@
       "Bash(ssh:*)",
       "Bash(scp:*)",
       "Bash(curl:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(chmod +x:*)",
+      "Bash(flutter run:*)",
+      "Bash(pkill:*)",
+      "Bash(dart analyze:*)"
     ]
   }
 }

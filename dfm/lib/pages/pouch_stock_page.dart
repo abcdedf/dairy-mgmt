@@ -5,12 +5,30 @@ import 'package:get/get.dart';
 import '../controllers/pouch_stock_controller.dart';
 import 'shared_widgets.dart';
 
-class PouchStockPage extends StatelessWidget {
+class PouchStockPage extends StatefulWidget {
   const PouchStockPage({super.key});
+  @override
+  State<PouchStockPage> createState() => _PouchStockPageState();
+}
+
+class _PouchStockPageState extends State<PouchStockPage> {
+  late final PouchStockController ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    Get.delete<PouchStockController>(force: true);
+    ctrl = Get.put(PouchStockController());
+  }
+
+  @override
+  void dispose() {
+    Get.delete<PouchStockController>(force: true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = Get.put(PouchStockController());
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pouch Stock', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
@@ -40,7 +58,7 @@ class PouchStockPage extends StatelessWidget {
             child: Table(
               columnWidths: const {
                 0: FlexColumnWidth(3),
-                1: FlexColumnWidth(1),
+                1: FlexColumnWidth(1.5),
                 2: FlexColumnWidth(1.5),
                 3: FlexColumnWidth(1.5),
               },
@@ -52,17 +70,17 @@ class PouchStockPage extends StatelessWidget {
                   decoration: BoxDecoration(color: kNavy.withValues(alpha: 0.05)),
                   children: const [
                     _HeaderCell('Pouch Type'),
-                    _HeaderCell('Litre'),
-                    _HeaderCell('Price'),
-                    _HeaderCell('Stock'),
+                    _HeaderCell('L/Pouch'),
+                    _HeaderCell('Per Crate'),
+                    _HeaderCell('Crates'),
                   ],
                 ),
                 ...ctrl.pouchStock.map((row) => TableRow(children: [
                   _DataCell(row.name),
-                  _DataCell(row.litre.toString()),
-                  _DataCell(row.price.toStringAsFixed(2)),
-                  _DataCell(row.produced.toString(),
-                      color: row.produced > 0 ? kGreen : Colors.grey),
+                  _DataCell(row.milkPerPouch.toString()),
+                  _DataCell(row.pouchesPerCrate.toString()),
+                  _DataCell(row.crateCount.toString(),
+                      color: row.crateCount > 0 ? kGreen : Colors.grey),
                 ])),
               ],
             ),

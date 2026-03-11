@@ -19,7 +19,8 @@ void main() {
 
   tearDown(() => cleanupTestState());
 
-  /// Helper: register canned vendor + stock responses so onInit completes.
+  /// Helper: register canned vendor + stock + flows + pouch-types responses
+  /// so onInit completes.
   void stubDefaults() {
     fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: [
       {'id': '10', 'name': 'Vendor A'},
@@ -28,6 +29,15 @@ void main() {
     fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
       'dates': <dynamic>[],
     }));
+    fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: [
+      {'key': 'ff_milk_purchase', 'label': 'FF Milk Purchase', 'sort_order': '1'},
+      {'key': 'ff_milk_processing', 'label': 'FF Milk Processing', 'sort_order': '2'},
+      {'key': 'curd_production', 'label': 'FF Milk -> Cream + Curd', 'sort_order': '10'},
+      {'key': 'madhusudan_sale', 'label': 'FF Milk -> Madhusudan', 'sort_order': '11'},
+    ]));
+    fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: [
+      {'id': '1', 'name': '500ml', 'milk_per_pouch': '0.50', 'pouches_per_crate': '20', 'is_active': '1'},
+    ]));
   }
 
   ProductionController createController() {
@@ -51,6 +61,8 @@ void main() {
 
     test('onInit fetches stock badges', () async {
       fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
       fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': [
           {
@@ -115,6 +127,8 @@ void main() {
 
     test('vendor loading sets isVendorLoading correctly', () async {
       fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
       fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': <dynamic>[],
       }));
@@ -134,6 +148,8 @@ void main() {
       fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': <dynamic>[],
       }));
+      fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
       createController();
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
@@ -141,6 +157,66 @@ void main() {
 
       expect(ctrl.stockFfMilk.value, isNull);
       expect(ctrl.stockCream.value, isNull);
+    });
+
+    test('stockCurd is populated from stock response (product_id 10)', () async {
+      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+        'dates': [
+          {
+            'date': '2026-03-04',
+            'stocks': {'1': 100, '2': 200, '3': 50, '4': 30, '6': 10, '10': 75},
+          }
+        ],
+      }));
+      createController();
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+
+      expect(ctrl.stockCurd.value, 75);
+    });
+
+    test('stockCurd is null when no dates returned', () async {
+      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+        'dates': <dynamic>[],
+      }));
+      createController();
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+
+      expect(ctrl.stockCurd.value, isNull);
+    });
+
+    test('onInit fetches production-flows and populates flowDefs', () async {
+      stubDefaults();
+      createController();
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+
+      expect(ctrl.flowDefs.length, 4);
+      expect(ctrl.flowDefs.first.key, 'ff_milk_purchase');
+      expect(ctrl.isFlowsLoading.value, false);
+    });
+
+    test('onInit fetches pouch-types and populates pouchTypes', () async {
+      stubDefaults();
+      createController();
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+
+      expect(ctrl.pouchTypes.length, 1);
+      expect(ctrl.pouchTypes.first.name, '500ml');
+      expect(ctrl.pouchTypes.first.milkPerPouch, 0.5);
+      expect(ctrl.pouchTypes.first.pouchesPerCrate, 20);
     });
   });
 }

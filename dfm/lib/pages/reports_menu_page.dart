@@ -10,6 +10,8 @@ import 'stock_page.dart';
 import 'stock_valuation_page.dart';
 import 'pouch_type_page.dart';
 import 'pouch_stock_page.dart';
+import 'pouch_pnl_page.dart';
+import 'madhusudan_pnl_page.dart';
 import '../core/permission_service.dart';
 
 class ReportsMenuPage extends StatelessWidget {
@@ -99,6 +101,24 @@ class ReportsMenuPage extends StatelessWidget {
                   builder: (_) => const StockValuationPage())),
             ),
           ],
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.sell_outlined,
+            color: const Color(0xFFD84315),
+            title: 'Madhusudan P&L',
+            subtitle: 'FF Milk direct sale — revenue, cost and profit per transaction',
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const MadhusudanPnlPage())),
+          ),
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.local_drink_outlined,
+            color: const Color(0xFF00695C),
+            title: 'Pouch P&L',
+            subtitle: 'Pouch production — revenue, cost and profit per batch',
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const PouchPnlPage())),
+          ),
           const SizedBox(height: 12),
           _ReportCard(
             icon: Icons.local_drink_outlined,

@@ -10,6 +10,26 @@ const kNavy  = Color(0xFF1B4F72);
 const kGreen = Color(0xFF1E8449);
 const kRed   = Color(0xFFE74C3C);
 
+// ── Mobile form factor wrapper ────────────────────────────────
+// Wrap data-entry pages with this to cap width at 390px on wide screens.
+// Report pages should NOT use this — they get full browser width.
+
+class MobileFormFactor extends StatelessWidget {
+  final Widget child;
+  const MobileFormFactor({required this.child, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 390),
+        child: child,
+      ),
+    );
+  }
+}
+
 // ── Input decoration factory ──────────────────────────────────
 
 InputDecoration fieldDec(String label, {
@@ -380,13 +400,17 @@ class _SyncedHorizontalBodyState extends State<SyncedHorizontalBody> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    return Scrollbar(
+      thumbVisibility: true,
       controller: _bodyHScroll,
-      scrollDirection: Axis.horizontal,
-      physics: const ClampingScrollPhysics(),
-      child: SizedBox(
-        width: widget.gridWidth,
-        child: widget.child,
+      child: SingleChildScrollView(
+        controller: _bodyHScroll,
+        scrollDirection: Axis.horizontal,
+        physics: const ClampingScrollPhysics(),
+        child: SizedBox(
+          width: widget.gridWidth,
+          child: widget.child,
+        ),
       ),
     );
   }

@@ -6,12 +6,30 @@ import 'package:intl/intl.dart';
 import 'shared_widgets.dart';
 import '../controllers/funds_report_controller.dart';
 
-class FundsReportPage extends StatelessWidget {
+class FundsReportPage extends StatefulWidget {
   const FundsReportPage({super.key});
+  @override
+  State<FundsReportPage> createState() => _FundsReportPageState();
+}
+
+class _FundsReportPageState extends State<FundsReportPage> {
+  late final FundsReportController c;
+
+  @override
+  void initState() {
+    super.initState();
+    Get.delete<FundsReportController>(force: true);
+    c = Get.put(FundsReportController());
+  }
+
+  @override
+  void dispose() {
+    Get.delete<FundsReportController>(force: true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final c = Get.put(FundsReportController());
     final fmt = NumberFormat('#,##,##0.00', 'en_IN');
 
     return Scaffold(
