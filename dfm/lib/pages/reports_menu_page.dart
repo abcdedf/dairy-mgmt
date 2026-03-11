@@ -8,6 +8,8 @@ import 'funds_report_page.dart';
 import 'transactions_page.dart';
 import 'stock_page.dart';
 import 'stock_valuation_page.dart';
+import 'pouch_type_page.dart';
+import 'pouch_stock_page.dart';
 import '../core/permission_service.dart';
 
 class ReportsMenuPage extends StatelessWidget {
@@ -97,6 +99,24 @@ class ReportsMenuPage extends StatelessWidget {
                   builder: (_) => const StockValuationPage())),
             ),
           ],
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.local_drink_outlined,
+            color: const Color(0xFF00838F),
+            title: 'Pouch Stock',
+            subtitle: 'Per-type pouch production balance',
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const PouchStockPage())),
+          ),
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.settings_outlined,
+            color: const Color(0xFF795548),
+            title: 'Pouch Types',
+            subtitle: 'Manage pouch types — name, litre, price',
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const PouchTypePage())),
+          ),
         ],
     );
   }

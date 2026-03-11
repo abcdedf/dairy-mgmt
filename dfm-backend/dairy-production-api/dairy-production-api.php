@@ -33,6 +33,10 @@ class Dairy_Production_API {
         'wp_mf_3_dp_sales'                 => 'Sales',
         'wp_mf_3_dp_estimated_rates'       => 'Estimated Rates',
         'wp_mf_3_dp_vendor_payments'       => 'Vendor Payments',
+        'wp_mf_3_dp_milk_usage'            => 'Milk Usage',
+        'wp_mf_3_dp_pouch_types'           => 'Pouch Types',
+        'wp_mf_3_dp_pouch_production'      => 'Pouch Production',
+        'wp_mf_3_dp_pouch_production_lines'=> 'Pouch Production Lines',
     ];
 
     // Pages every logged-in user with at least one location can see
@@ -330,6 +334,66 @@ class Dairy_Production_API {
                 MODIFY input_protein_kg DECIMAL(10,2) NOT NULL DEFAULT 0.00");
             $this->check_db('ensure_dahi_product.fix_decimal_cols');
         }
+
+        // ── Milk Usage table (shared per-vendor milk consumption tracking) ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_milk_usage (
+                id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                flow_type    VARCHAR(30) NOT NULL COMMENT 'milk_cream, pouch',
+                flow_id      INT UNSIGNED NOT NULL,
+                location_id  INT UNSIGNED NOT NULL,
+                entry_date   DATE NOT NULL,
+                vendor_id    INT UNSIGNED NOT NULL,
+                ff_milk_kg   INT UNSIGNED NOT NULL,
+                created_by   BIGINT UNSIGNED,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_mu_loc_date (location_id, entry_date),
+                KEY idx_mu_vendor (vendor_id),
+                KEY idx_mu_flow (flow_type, flow_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.milk_usage_table');
+
+        // ── Pouch Types master table ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_pouch_types (
+                id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                name       VARCHAR(100) NOT NULL,
+                litre      DECIMAL(5,2) NOT NULL,
+                price      DECIMAL(10,2) NOT NULL DEFAULT 0,
+                is_active  TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_pouch_name (name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.pouch_types_table');
+
+        // ── Pouch Production header ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_pouch_production (
+                id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                location_id      INT UNSIGNED NOT NULL,
+                entry_date       DATE NOT NULL,
+                output_cream_kg  INT UNSIGNED NOT NULL DEFAULT 0,
+                output_cream_fat DECIMAL(4,1) NOT NULL DEFAULT 0,
+                created_by       BIGINT UNSIGNED,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_pp_loc_date (location_id, entry_date)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.pouch_production_table');
+
+        // ── Pouch Production line items ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_pouch_production_lines (
+                id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                pouch_production_id INT UNSIGNED NOT NULL,
+                pouch_type_id       INT UNSIGNED NOT NULL,
+                quantity            INT UNSIGNED NOT NULL DEFAULT 0,
+                KEY idx_ppl_prod (pouch_production_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.pouch_production_lines_table');
     }
 
     public function register_routes(): void {
@@ -371,6 +435,13 @@ class Dairy_Production_API {
         $this->r('/vendor-ledger',          'GET',  'get_vendor_ledger',           $auth);
         $this->r('/vendor-ledger-detail',   'GET',  'get_vendor_ledger_detail',    $auth);
         $this->r('/funds-report',           'GET',  'get_funds_report',            $auth);
+        $this->r('/milk-availability',      'GET',  'get_milk_availability',       $auth);
+        $this->r('/pouch-types',            'GET',  'get_pouch_types',             $auth);
+        $this->r('/pouch-types',            'POST', 'save_pouch_type',             $auth);
+        $this->r('/pouch-types/(?P<id>\\d+)','POST','update_pouch_type',           $auth);
+        $this->r('/pouch-production',       'GET',  'get_pouch_production',        $auth);
+        $this->r('/pouch-production',       'POST', 'save_pouch_production',       $auth);
+        $this->r('/pouch-stock',            'GET',  'get_pouch_stock',             $auth);
     }
 
     private function r( string $path, string $method, string $cb, array $extra = [] ): void {
@@ -479,39 +550,130 @@ class Dairy_Production_API {
     public function save_milk_cream( WP_REST_Request $r ): WP_REST_Response {
         if ($e = $this->check_location_access($this->uid(), (int)$r->get_param('location_id'))) return $e;
         try {
-            foreach (['input_snf','input_fat','output_skim_snf','output_cream_fat'] as $f) {
+            $db        = $this->db();
+            $loc       = (int) $r['location_id'];
+            $is_purchase = (int)($r->get_param('input_ff_milk_kg') ?? 0) > 0;
+            $milk_usage  = $r->get_param('milk_usage'); // array for processing
+
+            if ($is_purchase) {
+                // ── Purchase path (unchanged) ──
+                foreach (['input_snf','input_fat'] as $f) {
+                    $v = $r->get_param($f);
+                    if ($v === null || $v === '') return $this->err("$f is required.");
+                    if ((float)$v >= 10)          return $this->err("$f must be less than 10.");
+                }
+                foreach (['location_id','input_ff_milk_kg'] as $f) {
+                    if (!ctype_digit((string)$r->get_param($f)))
+                        return $this->err("$f is required and must be a positive integer.");
+                }
+                $data = [
+                    'location_id'           => $loc,
+                    'vendor_id'             => $r->get_param('vendor_id') ? (int)$r->get_param('vendor_id') : null,
+                    'entry_date'            => $r['entry_date'],
+                    'input_ff_milk_kg'      => (int) $r['input_ff_milk_kg'],
+                    'input_snf'             => $this->d1($r['input_snf']),
+                    'input_fat'             => $this->d1($r['input_fat']),
+                    'input_rate'            => $this->d2($r['input_rate']),
+                    'input_ff_milk_used_kg' => 0,
+                    'output_skim_milk_kg'   => 0,
+                    'output_skim_snf'       => '0.0',
+                    'output_cream_kg'       => 0,
+                    'output_cream_fat'      => '0.0',
+                    'created_by'            => $this->uid(),
+                ];
+                if ($db->insert('wp_mf_3_dp_milk_cream_production', $data) === false) {
+                    $this->log_db('save_milk_cream', $db->last_error);
+                    return $this->err('Database error saving milk/cream record.', 500);
+                }
+                $id = $db->insert_id;
+                $this->audit('wp_mf_3_dp_milk_cream_production', $id, 'INSERT', null, $data);
+                return $this->ok(['id' => $id], 201);
+            }
+
+            // ── Processing path (with milk_usage vendor picks) ──
+            foreach (['output_skim_snf','output_cream_fat'] as $f) {
                 $v = $r->get_param($f);
                 if ($v === null || $v === '') return $this->err("$f is required.");
                 if ((float)$v >= 10)          return $this->err("$f must be less than 10.");
             }
-            foreach (['location_id','input_ff_milk_kg','input_ff_milk_used_kg','output_skim_milk_kg','output_cream_kg'] as $f) {
+            foreach (['output_skim_milk_kg','output_cream_kg'] as $f) {
                 if (!ctype_digit((string)$r->get_param($f)))
                     return $this->err("$f is required and must be a positive integer.");
             }
-            $db   = $this->db();
+            if (empty($milk_usage) || !is_array($milk_usage))
+                return $this->err('milk_usage array is required for processing.');
+
+            // Validate vendor availability
+            $total_used = 0;
+            foreach ($milk_usage as $mu) {
+                if (empty($mu['vendor_id']) || empty($mu['ff_milk_kg']))
+                    return $this->err('Each milk_usage entry needs vendor_id and ff_milk_kg.');
+                $avail = $this->vendor_milk_available($loc, (int)$mu['vendor_id']);
+                if ((int)$mu['ff_milk_kg'] > $avail)
+                    return $this->err("Vendor {$mu['vendor_id']}: requested {$mu['ff_milk_kg']} KG but only {$avail} KG available.");
+                $total_used += (int) $mu['ff_milk_kg'];
+            }
+
+            $db->query('START TRANSACTION');
+
             $data = [
-                'location_id'           => (int)  $r['location_id'],
-                'vendor_id'             => $r->get_param('vendor_id') ? (int)$r->get_param('vendor_id') : null,
-                'entry_date'            =>         $r['entry_date'],
-                'input_ff_milk_kg'      => (int)  $r['input_ff_milk_kg'],
-                'input_snf'             => $this->d1($r['input_snf']),
-                'input_fat'             => $this->d1($r['input_fat']),
-                'input_rate'            => $this->d2($r['input_rate']),
-                'input_ff_milk_used_kg' => (int)  $r['input_ff_milk_used_kg'],
-                'output_skim_milk_kg'   => (int)  $r['output_skim_milk_kg'],
+                'location_id'           => $loc,
+                'vendor_id'             => null,
+                'entry_date'            => $r['entry_date'],
+                'input_ff_milk_kg'      => 0,
+                'input_snf'             => '0.0',
+                'input_fat'             => '0.0',
+                'input_rate'            => '0.00',
+                'input_ff_milk_used_kg' => $total_used,
+                'output_skim_milk_kg'   => (int) $r['output_skim_milk_kg'],
                 'output_skim_snf'       => $this->d1($r['output_skim_snf']),
-                'output_cream_kg'       => (int)  $r['output_cream_kg'],
+                'output_cream_kg'       => (int) $r['output_cream_kg'],
                 'output_cream_fat'      => $this->d1($r['output_cream_fat']),
                 'created_by'            => $this->uid(),
             ];
             if ($db->insert('wp_mf_3_dp_milk_cream_production', $data) === false) {
-                $this->log_db('save_milk_cream', $db->last_error);
-                return $this->err('Database error saving milk/cream record.', 500);
+                $db->query('ROLLBACK');
+                $this->log_db('save_milk_cream.proc', $db->last_error);
+                return $this->err('Database error saving processing record.', 500);
             }
-            $id = $db->insert_id;
-            $this->audit('wp_mf_3_dp_milk_cream_production', $id, 'INSERT', null, $data);
-            return $this->ok(['id' => $id], 201);
+            $flow_id = $db->insert_id;
+            $this->audit('wp_mf_3_dp_milk_cream_production', $flow_id, 'INSERT', null, $data);
+
+            foreach ($milk_usage as $mu) {
+                $mu_data = [
+                    'flow_type'   => 'milk_cream',
+                    'flow_id'     => $flow_id,
+                    'location_id' => $loc,
+                    'entry_date'  => $r['entry_date'],
+                    'vendor_id'   => (int) $mu['vendor_id'],
+                    'ff_milk_kg'  => (int) $mu['ff_milk_kg'],
+                    'created_by'  => $this->uid(),
+                ];
+                if ($db->insert('wp_mf_3_dp_milk_usage', $mu_data) === false) {
+                    $db->query('ROLLBACK');
+                    $this->log_db('save_milk_cream.mu', $db->last_error);
+                    return $this->err('Database error saving milk usage.', 500);
+                }
+                $this->audit('wp_mf_3_dp_milk_usage', $db->insert_id, 'INSERT', null, $mu_data);
+            }
+
+            $db->query('COMMIT');
+            return $this->ok(['id' => $flow_id], 201);
         } catch (\Exception $e) { return $this->exc('save_milk_cream', $e); }
+    }
+
+    /**
+     * Per-vendor available FF Milk = purchased all-time minus consumed all-time via milk_usage.
+     */
+    private function vendor_milk_available(int $loc, int $vendor_id): int {
+        $db = $this->db();
+        $purchased = (int) $db->get_var($db->prepare(
+            "SELECT COALESCE(SUM(input_ff_milk_kg),0) FROM wp_mf_3_dp_milk_cream_production
+              WHERE location_id=%d AND vendor_id=%d AND input_ff_milk_kg > 0", $loc, $vendor_id));
+        $consumed = (int) $db->get_var($db->prepare(
+            "SELECT COALESCE(SUM(ff_milk_kg),0) FROM wp_mf_3_dp_milk_usage
+              WHERE location_id=%d AND vendor_id=%d", $loc, $vendor_id));
+        return $purchased - $consumed;
     }
 
     // ════════════════════════════════════════════════════
@@ -1114,58 +1276,9 @@ class Dairy_Production_API {
             $this->check_db('get_stock.products');
             // Stock movements — positives add, negatives reduce.
             // Each UNION ALL row is one movement type for one product.
-            $prod_rows = $db->get_results($db->prepare("
-                -- FF Milk received (+)
-                SELECT entry_date, 1 AS product_id, CAST(input_ff_milk_kg AS SIGNED) AS qty
-                  FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- FF Milk consumed in processing (-)
-                UNION ALL SELECT entry_date, 1, -CAST(input_ff_milk_used_kg AS SIGNED)
-                  FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Skim Milk produced (+)
-                UNION ALL SELECT entry_date, 2, CAST(output_skim_milk_kg AS SIGNED)
-                  FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Cream produced (+)
-                UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
-                  FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Cream consumed in Flow2 (-)
-                UNION ALL SELECT entry_date, 3, -CAST(input_cream_used_kg AS SIGNED)
-                  FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Butter produced in Flow2 (+)
-                UNION ALL SELECT entry_date, 4, CAST(output_butter_kg AS SIGNED)
-                  FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Butter consumed in Flow3 (-)
-                UNION ALL SELECT entry_date, 4, -CAST(input_butter_used_kg AS SIGNED)
-                  FROM wp_mf_3_dp_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Ghee produced in Flow2 (+)
-                UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
-                  FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Ghee produced in Flow3 (+)
-                UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
-                  FROM wp_mf_3_dp_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Skim Milk consumed by Dahi (-)
-                UNION ALL SELECT entry_date, 2, -CAST(input_skim_milk_kg AS SIGNED)
-                  FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Dahi containers produced (+)
-                UNION ALL SELECT entry_date, 6, CAST(output_container_count AS SIGNED)
-                  FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- SMP purchased (+)
-                UNION ALL SELECT entry_date, 7, CAST(quantity AS SIGNED)
-                  FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=7 AND location_id=%d AND entry_date BETWEEN %s AND %s
-                -- SMP consumed by Dahi (-)
-                UNION ALL SELECT entry_date, 7, -CAST(input_smp_bags AS SIGNED)
-                  FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Protein purchased (+)
-                UNION ALL SELECT entry_date, 8, CAST(quantity AS SIGNED)
-                  FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=8 AND location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Protein consumed by Dahi (-)
-                UNION ALL SELECT entry_date, 8, -CAST(input_protein_kg AS SIGNED)
-                  FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Culture purchased (+)
-                UNION ALL SELECT entry_date, 9, CAST(quantity AS SIGNED)
-                  FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=9 AND location_id=%d AND entry_date BETWEEN %s AND %s
-                -- Culture consumed by Dahi (-)
-                UNION ALL SELECT entry_date, 9, -CAST(input_culture_kg AS SIGNED)
-                  FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s",
+            $prod_rows = $db->get_results($db->prepare(
+                $this->stock_movements_sql(),
+                $loc,$from,$to,
                 $loc,$from,$to,
                 $loc,$from,$to,
                 $loc,$from,$to,
@@ -2046,6 +2159,17 @@ class Dairy_Production_API {
                 $this->log("prod_tx.ingredients diagnostic: total=$raw_count loc_match=$loc_count date_match=$date_count");
             }
 
+            // ── Pouch Production ─────────────────────────────────
+            $pouch = $db->get_results($db->prepare(
+                "SELECT pp.id, pp.entry_date, pp.created_at, pp.created_by,
+                        pp.output_cream_kg, pp.output_cream_fat
+                   FROM wp_mf_3_dp_pouch_production pp
+                  WHERE pp.location_id = %d AND pp.entry_date BETWEEN %s AND %s
+                  ORDER BY pp.entry_date DESC, pp.created_at DESC",
+                $loc, $from, $to
+            ), ARRAY_A);
+            $this->check_db('prod_tx.pouch');
+
             // ── Resolve user first names ───────────────────────────
             $user_ids = array_unique(array_filter(array_merge(
                 array_column($milk,   'created_by'),
@@ -2053,6 +2177,7 @@ class Dairy_Production_API {
                 array_column($butter, 'created_by'),
                 array_column($dahi,        'created_by'),
                 array_column($ingredients, 'created_by'),
+                array_column($pouch,       'created_by'),
             )));
             $names = $this->resolve_first_names($user_ids);
 
@@ -2091,6 +2216,12 @@ class Dairy_Production_API {
             foreach ($ingredients as $row) {
                 $rows[] = array_merge($row, [
                     'type'      => 'Ingredient Purchase',
+                    'user_name' => $names[$row['created_by']] ?? 'Unknown',
+                ]);
+            }
+            foreach ($pouch as $row) {
+                $rows[] = array_merge($row, [
+                    'type'      => 'Pouch Production',
                     'user_name' => $names[$row['created_by']] ?? 'Unknown',
                 ]);
             }
@@ -2195,47 +2326,14 @@ class Dairy_Production_API {
             foreach ($locations as $loc_row) {
                 $loc = (int) $loc_row['id'];
 
-                // Reuse same stock movement SQL as get_stock()
-                $prod_rows = $db->get_results($db->prepare("
-                    SELECT entry_date, 1 AS product_id, CAST(input_ff_milk_kg AS SIGNED) AS qty
-                      FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 1, -CAST(input_ff_milk_used_kg AS SIGNED)
-                      FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 2, CAST(output_skim_milk_kg AS SIGNED)
-                      FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
-                      FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 3, -CAST(input_cream_used_kg AS SIGNED)
-                      FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 4, CAST(output_butter_kg AS SIGNED)
-                      FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 4, -CAST(input_butter_used_kg AS SIGNED)
-                      FROM wp_mf_3_dp_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
-                      FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
-                      FROM wp_mf_3_dp_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 2, -CAST(input_skim_milk_kg AS SIGNED)
-                      FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 6, CAST(output_container_count AS SIGNED)
-                      FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 7, CAST(quantity AS SIGNED)
-                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=7 AND location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 7, -CAST(input_smp_bags AS SIGNED)
-                      FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 8, CAST(quantity AS SIGNED)
-                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=8 AND location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 8, -CAST(input_protein_kg AS SIGNED)
-                      FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 9, CAST(quantity AS SIGNED)
-                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=9 AND location_id=%d AND entry_date BETWEEN %s AND %s
-                    UNION ALL SELECT entry_date, 9, -CAST(input_culture_kg AS SIGNED)
-                      FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s",
+                // Reuse shared stock movement SQL
+                $prod_rows = $db->get_results($db->prepare(
+                    $this->stock_movements_sql(),
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
-                    $loc,$from,$to, $loc,$from,$to, $loc,$from,$to
+                    $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to
                 ), ARRAY_A);
                 $this->check_db("funds_report.stock_loc_$loc");
 
@@ -2316,6 +2414,339 @@ class Dairy_Production_API {
             }
         }
         return $names;
+    }
+
+    // ════════════════════════════════════════════════════
+    // SHARED STOCK MOVEMENTS SQL
+    // ════════════════════════════════════════════════════
+
+    /**
+     * Returns the UNION ALL SQL for all stock movements.
+     * Requires 20 sets of ($loc,$from,$to) parameters.
+     */
+    private function stock_movements_sql(): string {
+        return "
+            -- FF Milk received (+)
+            SELECT entry_date, 1 AS product_id, CAST(input_ff_milk_kg AS SIGNED) AS qty
+              FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- FF Milk consumed via milk_usage (all flows) (-)
+            UNION ALL SELECT entry_date, 1, -CAST(ff_milk_kg AS SIGNED)
+              FROM wp_mf_3_dp_milk_usage WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Skim Milk produced (+)
+            UNION ALL SELECT entry_date, 2, CAST(output_skim_milk_kg AS SIGNED)
+              FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Cream produced in Flow1 (+)
+            UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
+              FROM wp_mf_3_dp_milk_cream_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Cream produced in Flow5 Pouch (+)
+            UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
+              FROM wp_mf_3_dp_pouch_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Cream consumed in Flow2 (-)
+            UNION ALL SELECT entry_date, 3, -CAST(input_cream_used_kg AS SIGNED)
+              FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Butter produced in Flow2 (+)
+            UNION ALL SELECT entry_date, 4, CAST(output_butter_kg AS SIGNED)
+              FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Butter consumed in Flow3 (-)
+            UNION ALL SELECT entry_date, 4, -CAST(input_butter_used_kg AS SIGNED)
+              FROM wp_mf_3_dp_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Ghee produced in Flow2 (+)
+            UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
+              FROM wp_mf_3_dp_cream_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Ghee produced in Flow3 (+)
+            UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
+              FROM wp_mf_3_dp_butter_ghee WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Skim Milk consumed by Dahi (-)
+            UNION ALL SELECT entry_date, 2, -CAST(input_skim_milk_kg AS SIGNED)
+              FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Dahi containers produced (+)
+            UNION ALL SELECT entry_date, 6, CAST(output_container_count AS SIGNED)
+              FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- SMP purchased (+)
+            UNION ALL SELECT entry_date, 7, CAST(quantity AS SIGNED)
+              FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=7 AND location_id=%d AND entry_date BETWEEN %s AND %s
+            -- SMP consumed by Dahi (-)
+            UNION ALL SELECT entry_date, 7, -CAST(input_smp_bags AS SIGNED)
+              FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Protein purchased (+)
+            UNION ALL SELECT entry_date, 8, CAST(quantity AS SIGNED)
+              FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=8 AND location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Protein consumed by Dahi (-)
+            UNION ALL SELECT entry_date, 8, -CAST(input_protein_kg AS SIGNED)
+              FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Culture purchased (+)
+            UNION ALL SELECT entry_date, 9, CAST(quantity AS SIGNED)
+              FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=9 AND location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Culture consumed by Dahi (-)
+            UNION ALL SELECT entry_date, 9, -CAST(input_culture_kg AS SIGNED)
+              FROM wp_mf_3_dp_dahi_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+        ";
+    }
+
+    // ════════════════════════════════════════════════════
+    // MILK AVAILABILITY — per-vendor available FF Milk
+    // ════════════════════════════════════════════════════
+
+    public function get_milk_availability( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->validate_loc($r)) return $e;
+        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        try {
+            $db  = $this->db();
+            $loc = (int) $r['location_id'];
+
+            // Purchased per vendor (all-time)
+            $purchased = $db->get_results($db->prepare(
+                "SELECT m.vendor_id, v.name AS vendor_name,
+                        COALESCE(SUM(m.input_ff_milk_kg),0) AS purchased
+                   FROM wp_mf_3_dp_milk_cream_production m
+                   JOIN wp_mf_3_dp_vendors v ON v.id = m.vendor_id
+                  WHERE m.location_id=%d AND m.input_ff_milk_kg > 0 AND m.vendor_id IS NOT NULL
+                  GROUP BY m.vendor_id, v.name", $loc), ARRAY_A);
+            $this->check_db('milk_availability.purchased');
+
+            // Consumed per vendor (all-time) via milk_usage
+            $consumed = $db->get_results($db->prepare(
+                "SELECT vendor_id, COALESCE(SUM(ff_milk_kg),0) AS consumed
+                   FROM wp_mf_3_dp_milk_usage WHERE location_id=%d
+                  GROUP BY vendor_id", $loc), ARRAY_A);
+            $this->check_db('milk_availability.consumed');
+
+            $consumed_map = [];
+            foreach ($consumed as $c) $consumed_map[(int)$c['vendor_id']] = (int)$c['consumed'];
+
+            $result = [];
+            foreach ($purchased as $p) {
+                $vid   = (int) $p['vendor_id'];
+                $avail = (int) $p['purchased'] - ($consumed_map[$vid] ?? 0);
+                if ($avail > 0) {
+                    $result[] = [
+                        'vendor_id'    => $vid,
+                        'vendor_name'  => $p['vendor_name'],
+                        'available_kg' => $avail,
+                    ];
+                }
+            }
+            return $this->ok($result);
+        } catch (\Exception $e) { return $this->exc('get_milk_availability', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
+    // POUCH TYPES CRUD
+    // ════════════════════════════════════════════════════
+
+    public function get_pouch_types(): WP_REST_Response {
+        try {
+            $rows = $this->db()->get_results(
+                "SELECT id, name, litre, price, is_active FROM wp_mf_3_dp_pouch_types ORDER BY name",
+                ARRAY_A);
+            $this->check_db('get_pouch_types');
+            return $this->ok($rows ?? []);
+        } catch (\Exception $e) { return $this->exc('get_pouch_types', $e); }
+    }
+
+    public function save_pouch_type( WP_REST_Request $r ): WP_REST_Response {
+        try {
+            $name  = trim($r->get_param('name') ?? '');
+            $litre = (float) ($r->get_param('litre') ?? 0);
+            $price = (float) ($r->get_param('price') ?? 0);
+            if (empty($name)) return $this->err('name is required.');
+            if ($litre <= 0)  return $this->err('litre must be > 0.');
+            if ($price < 0)   return $this->err('price must be >= 0.');
+
+            $db   = $this->db();
+            $data = [
+                'name'  => $name,
+                'litre' => $this->d2($litre),
+                'price' => $this->d2($price),
+            ];
+            if ($db->insert('wp_mf_3_dp_pouch_types', $data) === false) {
+                $this->log_db('save_pouch_type', $db->last_error);
+                return $this->err('Database error (duplicate name?).', 500);
+            }
+            $id = $db->insert_id;
+            $this->audit('wp_mf_3_dp_pouch_types', $id, 'INSERT', null, $data);
+            return $this->ok(['id' => $id], 201);
+        } catch (\Exception $e) { return $this->exc('save_pouch_type', $e); }
+    }
+
+    public function update_pouch_type( WP_REST_Request $r ): WP_REST_Response {
+        try {
+            $id = (int) $r['id'];
+            if (!$id) return $this->err('id is required.');
+            $db = $this->db();
+            $old = $db->get_row($db->prepare(
+                "SELECT * FROM wp_mf_3_dp_pouch_types WHERE id=%d", $id), ARRAY_A);
+            if (!$old) return $this->err('Pouch type not found.', 404);
+
+            $name  = trim($r->get_param('name') ?? $old['name']);
+            $litre = $r->get_param('litre') !== null ? (float)$r->get_param('litre') : (float)$old['litre'];
+            $price = $r->get_param('price') !== null ? (float)$r->get_param('price') : (float)$old['price'];
+            $active = $r->get_param('is_active') !== null ? (int)$r->get_param('is_active') : (int)$old['is_active'];
+
+            $data = [
+                'name'      => $name,
+                'litre'     => $this->d2($litre),
+                'price'     => $this->d2($price),
+                'is_active' => $active,
+            ];
+            $db->update('wp_mf_3_dp_pouch_types', $data, ['id' => $id]);
+            $this->check_db('update_pouch_type');
+            $new = $db->get_row($db->prepare(
+                "SELECT * FROM wp_mf_3_dp_pouch_types WHERE id=%d", $id), ARRAY_A);
+            $this->audit('wp_mf_3_dp_pouch_types', $id, 'UPDATE', $old, $new);
+            return $this->ok(['id' => $id]);
+        } catch (\Exception $e) { return $this->exc('update_pouch_type', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
+    // FLOW 5 - FF Milk → Cream + Pouches
+    // ════════════════════════════════════════════════════
+
+    public function get_pouch_production( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->validate_loc_date($r)) return $e;
+        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        try {
+            $db  = $this->db();
+            $loc = (int) $r['location_id'];
+            $dt  = $r['entry_date'];
+            $rows = $db->get_results($db->prepare(
+                "SELECT pp.*, l.name AS location_name
+                   FROM wp_mf_3_dp_pouch_production pp
+                   JOIN wp_mf_3_dp_locations l ON l.id = pp.location_id
+                  WHERE pp.location_id=%d AND pp.entry_date=%s
+                  ORDER BY pp.created_at DESC", $loc, $dt), ARRAY_A);
+            $this->check_db('get_pouch_production');
+
+            // Attach lines and milk_usage to each row
+            foreach ($rows as &$row) {
+                $pid = (int) $row['id'];
+                $row['lines'] = $db->get_results($db->prepare(
+                    "SELECT ppl.pouch_type_id, pt.name AS pouch_type_name,
+                            pt.litre, pt.price, ppl.quantity
+                       FROM wp_mf_3_dp_pouch_production_lines ppl
+                       JOIN wp_mf_3_dp_pouch_types pt ON pt.id = ppl.pouch_type_id
+                      WHERE ppl.pouch_production_id=%d", $pid), ARRAY_A);
+                $row['milk_usage'] = $db->get_results($db->prepare(
+                    "SELECT mu.vendor_id, v.name AS vendor_name, mu.ff_milk_kg
+                       FROM wp_mf_3_dp_milk_usage mu
+                       JOIN wp_mf_3_dp_vendors v ON v.id = mu.vendor_id
+                      WHERE mu.flow_type='pouch' AND mu.flow_id=%d", $pid), ARRAY_A);
+            }
+            unset($row);
+            return $this->ok($rows);
+        } catch (\Exception $e) { return $this->exc('get_pouch_production', $e); }
+    }
+
+    public function save_pouch_production( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_location_access($this->uid(), (int)$r->get_param('location_id'))) return $e;
+        try {
+            $db         = $this->db();
+            $loc        = (int) $r['location_id'];
+            $milk_usage = $r->get_param('milk_usage');
+            $pouch_lines= $r->get_param('pouch_lines');
+
+            if (empty($milk_usage) || !is_array($milk_usage))
+                return $this->err('milk_usage array is required.');
+            if (empty($pouch_lines) || !is_array($pouch_lines))
+                return $this->err('pouch_lines array is required.');
+
+            // Validate cream output
+            $cream_fat = $r->get_param('output_cream_fat');
+            if ($cream_fat !== null && (float)$cream_fat >= 10)
+                return $this->err('output_cream_fat must be < 10.');
+
+            // Validate vendor availability
+            $total_milk = 0;
+            foreach ($milk_usage as $mu) {
+                if (empty($mu['vendor_id']) || empty($mu['ff_milk_kg']))
+                    return $this->err('Each milk_usage entry needs vendor_id and ff_milk_kg.');
+                $avail = $this->vendor_milk_available($loc, (int)$mu['vendor_id']);
+                if ((int)$mu['ff_milk_kg'] > $avail)
+                    return $this->err("Vendor {$mu['vendor_id']}: requested {$mu['ff_milk_kg']} KG but only {$avail} KG available.");
+                $total_milk += (int) $mu['ff_milk_kg'];
+            }
+
+            $db->query('START TRANSACTION');
+
+            // Insert pouch_production header
+            $data = [
+                'location_id'      => $loc,
+                'entry_date'       => $r['entry_date'],
+                'output_cream_kg'  => (int) ($r->get_param('output_cream_kg') ?? 0),
+                'output_cream_fat' => $this->d1($cream_fat ?? 0),
+                'created_by'       => $this->uid(),
+            ];
+            if ($db->insert('wp_mf_3_dp_pouch_production', $data) === false) {
+                $db->query('ROLLBACK');
+                $this->log_db('save_pouch_production', $db->last_error);
+                return $this->err('Database error saving pouch production.', 500);
+            }
+            $pp_id = $db->insert_id;
+            $this->audit('wp_mf_3_dp_pouch_production', $pp_id, 'INSERT', null, $data);
+
+            // Insert pouch lines
+            foreach ($pouch_lines as $line) {
+                $line_data = [
+                    'pouch_production_id' => $pp_id,
+                    'pouch_type_id'       => (int) $line['pouch_type_id'],
+                    'quantity'            => (int) $line['quantity'],
+                ];
+                if ($db->insert('wp_mf_3_dp_pouch_production_lines', $line_data) === false) {
+                    $db->query('ROLLBACK');
+                    $this->log_db('save_pouch_production.line', $db->last_error);
+                    return $this->err('Database error saving pouch line.', 500);
+                }
+                $this->audit('wp_mf_3_dp_pouch_production_lines', $db->insert_id, 'INSERT', null, $line_data);
+            }
+
+            // Insert milk_usage rows
+            foreach ($milk_usage as $mu) {
+                $mu_data = [
+                    'flow_type'   => 'pouch',
+                    'flow_id'     => $pp_id,
+                    'location_id' => $loc,
+                    'entry_date'  => $r['entry_date'],
+                    'vendor_id'   => (int) $mu['vendor_id'],
+                    'ff_milk_kg'  => (int) $mu['ff_milk_kg'],
+                    'created_by'  => $this->uid(),
+                ];
+                if ($db->insert('wp_mf_3_dp_milk_usage', $mu_data) === false) {
+                    $db->query('ROLLBACK');
+                    $this->log_db('save_pouch_production.mu', $db->last_error);
+                    return $this->err('Database error saving milk usage.', 500);
+                }
+                $this->audit('wp_mf_3_dp_milk_usage', $db->insert_id, 'INSERT', null, $mu_data);
+            }
+
+            $db->query('COMMIT');
+            return $this->ok(['id' => $pp_id], 201);
+        } catch (\Exception $e) { return $this->exc('save_pouch_production', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
+    // POUCH STOCK — per-type balance
+    // ════════════════════════════════════════════════════
+
+    public function get_pouch_stock( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->validate_loc($r)) return $e;
+        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        try {
+            $db  = $this->db();
+            $loc = (int) $r['location_id'];
+            $rows = $db->get_results($db->prepare(
+                "SELECT pt.id AS pouch_type_id, pt.name, pt.litre, pt.price,
+                        COALESCE(SUM(ppl.quantity), 0) AS produced
+                   FROM wp_mf_3_dp_pouch_types pt
+                   LEFT JOIN wp_mf_3_dp_pouch_production_lines ppl
+                        ON ppl.pouch_type_id = pt.id
+                   LEFT JOIN wp_mf_3_dp_pouch_production pp
+                        ON pp.id = ppl.pouch_production_id AND pp.location_id = %d
+                  WHERE pt.is_active = 1
+                  GROUP BY pt.id, pt.name, pt.litre, pt.price
+                  ORDER BY pt.name", $loc), ARRAY_A);
+            $this->check_db('get_pouch_stock');
+            return $this->ok($rows ?? []);
+        } catch (\Exception $e) { return $this->exc('get_pouch_stock', $e); }
     }
 
     private function db(): wpdb  { global $wpdb; return $wpdb; }

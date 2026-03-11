@@ -86,6 +86,7 @@ coverage/
 # Environment / secrets
 .env
 .env.*
+dart_defines*.json
 *.keystore
 *.jks
 google-services.json

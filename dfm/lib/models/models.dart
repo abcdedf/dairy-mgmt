@@ -214,6 +214,53 @@ class EstimatedRate {
   );
 }
 
+// ── Vendor Milk Availability ─────────────────────────────────
+class VendorMilkAvailability {
+  final int vendorId;
+  final String vendorName;
+  final int availableKg;
+  const VendorMilkAvailability({required this.vendorId, required this.vendorName, required this.availableKg});
+  factory VendorMilkAvailability.fromJson(Map<String, dynamic> j) => VendorMilkAvailability(
+    vendorId: int.parse(j['vendor_id'].toString()),
+    vendorName: j['vendor_name'].toString(),
+    availableKg: int.parse(j['available_kg'].toString()),
+  );
+}
+
+// ── Pouch Type ──────────────────────────────────────────────
+class PouchType {
+  final int id;
+  final String name;
+  final double litre;
+  final double price;
+  final bool isActive;
+  const PouchType({required this.id, required this.name, required this.litre, required this.price, required this.isActive});
+  factory PouchType.fromJson(Map<String, dynamic> j) => PouchType(
+    id: int.parse(j['id'].toString()),
+    name: j['name'].toString(),
+    litre: double.parse(j['litre'].toString()),
+    price: double.parse(j['price'].toString()),
+    isActive: j['is_active'].toString() == '1',
+  );
+}
+
+// ── Pouch Stock Row ─────────────────────────────────────────
+class PouchStockRow {
+  final int pouchTypeId;
+  final String name;
+  final double litre;
+  final double price;
+  final int produced;
+  const PouchStockRow({required this.pouchTypeId, required this.name, required this.litre, required this.price, required this.produced});
+  factory PouchStockRow.fromJson(Map<String, dynamic> j) => PouchStockRow(
+    pouchTypeId: int.parse(j['pouch_type_id'].toString()),
+    name: j['name'].toString(),
+    litre: double.parse(j['litre'].toString()),
+    price: double.parse(j['price'].toString()),
+    produced: int.parse(j['produced'].toString()),
+  );
+}
+
 // ── Audit Log ────────────────────────────────────────────────
 class AuditLogEntry {
   final int id;

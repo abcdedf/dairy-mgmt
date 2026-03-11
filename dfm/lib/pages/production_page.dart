@@ -134,28 +134,30 @@ class _EntryForm extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DCard(
-      child: Form(
-        key: ctrl.formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(entry.icon, size: 18, color: kNavy),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  entry.label,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: kNavy),
+    return FocusTraversalGroup(
+      child: DCard(
+        child: Form(
+          key: ctrl.formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(entry.icon, size: 18, color: kNavy),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    entry.label,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: kNavy),
+                  ),
                 ),
-              ),
-            ]),
-            const SizedBox(height: 16),
-            ..._fields(),
-          ],
+              ]),
+              const SizedBox(height: 16),
+              ..._fields(),
+            ],
+          ),
         ),
       ),
     );
@@ -227,10 +229,7 @@ class _EntryForm extends StatelessWidget {
         return [
           _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
           const SizedBox(height: 10),
-          IntField(ctrl.ffMilkUsedCtrl, 'FF Milk Used', 'KG'),
-          const SizedBox(height: 4),
-          Text('From stock — reduces FF Milk balance.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+          _VendorMilkPicker(ctrl: ctrl),
           const SizedBox(height: 12),
           Row2(
             IntField(ctrl.skimMilkCtrl, 'Skim Milk', 'KG'),
@@ -300,6 +299,20 @@ class _EntryForm extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
           const SizedBox(height: 12),
           IntField(ctrl.gheeOut3Ctrl, 'Ghee', 'KG'),
+        ];
+
+      case DataEntry.pouchProduction:
+        return [
+          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
+          const SizedBox(height: 10),
+          _VendorMilkPicker(ctrl: ctrl),
+          const SizedBox(height: 12),
+          Row2(
+            IntField(ctrl.pouchCreamOutCtrl, 'Cream Out', 'KG'),
+            SnfFatField(ctrl.pouchCreamFatCtrl, 'Cream Fat'),
+          ),
+          const SizedBox(height: 12),
+          _PouchLinePicker(ctrl: ctrl),
         ];
 
       case DataEntry.dahiProcessing:
@@ -404,6 +417,300 @@ class _StockBadge extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   color: isNeg ? kRed : kGreen)),
         ]),
+      );
+    });
+  }
+}
+
+// ── Vendor Milk Picker — reusable multi-vendor milk selection ──────────────
+
+class _VendorMilkPicker extends StatelessWidget {
+  final ProductionController ctrl;
+  const _VendorMilkPicker({required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      if (ctrl.isLoadingAvail.value) return const LoadingCenter();
+      if (ctrl.milkAvailability.isEmpty) {
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: kRed.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Text('No milk available from any vendor. Record FF Milk Purchases first.',
+              style: TextStyle(fontSize: 13, color: kRed)),
+        );
+      }
+
+      // Initialize with one row if empty
+      if (ctrl.milkUsageRows.isEmpty) ctrl.addMilkUsageRow();
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Milk from Vendors',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+          const SizedBox(height: 8),
+          ...List.generate(ctrl.milkUsageRows.length, (i) {
+            final row = ctrl.milkUsageRows[i];
+            final selectedVid = row['vendor_id'] as int?;
+            // Already-selected vendor IDs (exclude current row)
+            final usedIds = ctrl.milkUsageRows
+                .where((r) => r != row && r['vendor_id'] != null)
+                .map((r) => r['vendor_id'] as int)
+                .toSet();
+            final availVendors = ctrl.milkAvailability
+                .where((v) => !usedIds.contains(v.vendorId) || v.vendorId == selectedVid)
+                .toList();
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: DropdownButtonFormField<int>(
+                      initialValue: selectedVid,
+                      isExpanded: true,
+                      decoration: fieldDec('Vendor', isDense: true),
+                      items: availVendors.map((v) => DropdownMenuItem(
+                        value: v.vendorId,
+                        child: Text('${v.vendorName} (${v.availableKg} KG)',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12)),
+                      )).toList(),
+                      onChanged: (id) {
+                        ctrl.milkUsageRows[i] = {
+                          ...row,
+                          'vendor_id': id,
+                        };
+                        ctrl.milkUsageRows.refresh();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: row['ctrl'] as TextEditingController,
+                      decoration: fieldDec('KG', isDense: true),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return null;
+                        final qty = int.tryParse(v);
+                        if (qty == null || qty <= 0) return 'Invalid';
+                        if (selectedVid != null) {
+                          final avail = ctrl.milkAvailability
+                              .where((a) => a.vendorId == selectedVid)
+                              .firstOrNull?.availableKg ?? 0;
+                          if (qty > avail) return 'Max $avail';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                  if (ctrl.milkUsageRows.length > 1)
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline, color: kRed, size: 20),
+                      onPressed: () => ctrl.removeMilkUsageRow(i),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32),
+                    ),
+                ],
+              ),
+            );
+          }),
+          // ── Total row ──
+          if (ctrl.milkUsageRows.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: Row(children: [
+                const Spacer(flex: 3),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: _MilkUsageTotal(rows: ctrl.milkUsageRows),
+                ),
+                const SizedBox(width: 32),
+              ]),
+            ),
+          if (ctrl.milkUsageRows.length < ctrl.milkAvailability.length)
+            TextButton.icon(
+              onPressed: ctrl.addMilkUsageRow,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Add Vendor', style: TextStyle(fontSize: 13)),
+            ),
+        ],
+      );
+    });
+  }
+}
+
+// ── Live total of milk usage quantities ──────────────────────────────────
+
+class _MilkUsageTotal extends StatefulWidget {
+  final List<Map<String, dynamic>> rows;
+  const _MilkUsageTotal({required this.rows});
+
+  @override
+  State<_MilkUsageTotal> createState() => _MilkUsageTotalState();
+}
+
+class _MilkUsageTotalState extends State<_MilkUsageTotal> {
+  int _total = 0;
+
+  void _recalc() {
+    int sum = 0;
+    for (final row in widget.rows) {
+      final c = row['ctrl'] as TextEditingController;
+      sum += int.tryParse(c.text) ?? 0;
+    }
+    if (sum != _total) setState(() => _total = sum);
+  }
+
+  void _attach() {
+    for (final row in widget.rows) {
+      (row['ctrl'] as TextEditingController).addListener(_recalc);
+    }
+    _recalc();
+  }
+
+  void _detach() {
+    for (final row in widget.rows) {
+      try { (row['ctrl'] as TextEditingController).removeListener(_recalc); } catch (_) {}
+    }
+  }
+
+  @override
+  void initState() { super.initState(); _attach(); }
+
+  @override
+  void didUpdateWidget(covariant _MilkUsageTotal old) {
+    super.didUpdateWidget(old);
+    _detach();
+    _attach();
+  }
+
+  @override
+  void dispose() { _detach(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: kNavy.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text('Total: $_total KG',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: kNavy)),
+    );
+  }
+}
+
+// ── Pouch Line Picker — dynamic pouch type + quantity rows ────────────────
+
+class _PouchLinePicker extends StatelessWidget {
+  final ProductionController ctrl;
+  const _PouchLinePicker({required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      if (ctrl.pouchTypes.isEmpty) {
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Text('No pouch types configured. Add them from Reports > Pouch Types.',
+              style: TextStyle(fontSize: 13, color: Colors.deepOrange)),
+        );
+      }
+
+      if (ctrl.pouchLineRows.isEmpty) ctrl.addPouchLineRow();
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Pouch Output',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+          const SizedBox(height: 8),
+          ...List.generate(ctrl.pouchLineRows.length, (i) {
+            final row = ctrl.pouchLineRows[i];
+            final selectedPtId = row['pouch_type_id'] as int?;
+            final usedIds = ctrl.pouchLineRows
+                .where((r) => r != row && r['pouch_type_id'] != null)
+                .map((r) => r['pouch_type_id'] as int)
+                .toSet();
+            final availTypes = ctrl.pouchTypes
+                .where((t) => !usedIds.contains(t.id) || t.id == selectedPtId)
+                .toList();
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: DropdownButtonFormField<int>(
+                      initialValue: selectedPtId,
+                      isExpanded: true,
+                      decoration: fieldDec('Pouch Type', isDense: true),
+                      items: availTypes.map((t) => DropdownMenuItem(
+                        value: t.id,
+                        child: Text('${t.name} (${t.litre}L)',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12)),
+                      )).toList(),
+                      onChanged: (id) {
+                        ctrl.pouchLineRows[i] = {
+                          ...row,
+                          'pouch_type_id': id,
+                        };
+                        ctrl.pouchLineRows.refresh();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: row['ctrl'] as TextEditingController,
+                      decoration: fieldDec('Qty (pcs)', isDense: true),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Required';
+                        final qty = int.tryParse(v);
+                        if (qty == null || qty <= 0) return 'Invalid';
+                        return null;
+                      },
+                    ),
+                  ),
+                  if (ctrl.pouchLineRows.length > 1)
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline, color: kRed, size: 20),
+                      onPressed: () => ctrl.removePouchLineRow(i),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32),
+                    ),
+                ],
+              ),
+            );
+          }),
+          if (ctrl.pouchLineRows.length < ctrl.pouchTypes.length)
+            TextButton.icon(
+              onPressed: ctrl.addPouchLineRow,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Add Pouch Type', style: TextStyle(fontSize: 13)),
+            ),
+        ],
       );
     });
   }

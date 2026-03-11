@@ -3,49 +3,49 @@
 ## Project Structure
 
 ```
-dairy-mgmt/                             ← You are here (Claude Code root)
+<project-root>/                          ← Claude's working directory (set by environment)
 ├── CLAUDE.md                           ← This file
-├── flutter-app/                        ← Flutter project root (pubspec.yaml here)
-│   └── lib/
-│       └── lib/                        ← Dart source root
-│           ├── main.dart
-│           ├── models/
-│           │   └── models.dart
-│           ├── core/
-│           │   ├── api_client.dart
-│           │   ├── app_config.dart
-│           │   ├── auth_service.dart
-│           │   ├── permission_service.dart
-│           │   ├── location_service.dart
-│           │   ├── navigation_service.dart
-│           │   └── connectivity_service.dart
-│           ├── controllers/
-│           │   ├── production_controller.dart
-│           │   ├── sales_controller.dart
-│           │   ├── stock_controller.dart
-│           │   ├── stock_valuation_controller.dart
-│           │   ├── audit_log_controller.dart
-│           │   ├── transactions_controller.dart
-│           │   ├── sales_report_controller.dart
-│           │   └── vendor_purchase_report_controller.dart
-│           └── pages/
-│               ├── shared_widgets.dart
-│               ├── production_page.dart
-│               ├── sales_page.dart
-│               ├── stock_page.dart
-│               ├── stock_valuation_page.dart
-│               ├── audit_log_page.dart
-│               ├── transactions_page.dart
-│               ├── sales_report_page.dart
-│               ├── vendor_purchase_report_page.dart
-│               ├── reports_menu_page.dart
-│               ├── login_page.dart
-│               └── splash_page.dart
-└── wordpress-backend/
-    ├── dairy-production-api/
-    │   └── dairy-production-api.php    ← Main plugin — ALL endpoints (v3.1.0)
-    └── dairy-jwt-auth/
-        └── dairy-jwt-auth.php          ← JWT auth bridge plugin
+├── dfm/                                ← Flutter project root (pubspec.yaml here)
+│   └── lib/                            ← Dart source root
+│       ├── main.dart
+│       ├── models/
+│       │   └── models.dart
+│       ├── core/
+│       │   ├── api_client.dart
+│       │   ├── app_config.dart
+│       │   ├── auth_service.dart
+│       │   ├── permission_service.dart
+│       │   ├── location_service.dart
+│       │   ├── navigation_service.dart
+│       │   └── connectivity_service.dart
+│       ├── controllers/
+│       │   ├── production_controller.dart
+│       │   ├── sales_controller.dart
+│       │   ├── stock_controller.dart
+│       │   ├── stock_valuation_controller.dart
+│       │   ├── audit_log_controller.dart
+│       │   ├── transactions_controller.dart
+│       │   ├── sales_report_controller.dart
+│       │   └── vendor_purchase_report_controller.dart
+│       └── pages/
+│           ├── shared_widgets.dart
+│           ├── production_page.dart
+│           ├── sales_page.dart
+│           ├── stock_page.dart
+│           ├── stock_valuation_page.dart
+│           ├── audit_log_page.dart
+│           ├── transactions_page.dart
+│           ├── sales_report_page.dart
+│           ├── vendor_purchase_report_page.dart
+│           ├── reports_menu_page.dart
+│           ├── login_page.dart
+│           └── splash_page.dart
+├── dfm-backend/
+│   ├── dairy-production-api/
+│   │   └── dairy-production-api.php    ← Main plugin — ALL endpoints (v3.1.0)
+│   └── dairy-jwt-auth/
+│       └── dairy-jwt-auth.php          ← JWT auth bridge plugin
+└── test/                               ← Test scripts (gitignored)
 ```
 
 ---
@@ -53,10 +53,10 @@ dairy-mgmt/                             ← You are here (Claude Code root)
 ## Architecture Overview
 
 ```
-Flutter App  (flutter-app/)
+Flutter App  (dfm/)
     │  JWT Bearer token on every request
     ▼
-WordPress REST API  (wordpress-backend/)
+WordPress REST API  (dfm-backend/)
     Namespace: /wp-json/dairy/v1
     │  wpdb queries
     ▼
@@ -95,14 +95,19 @@ The instruction may not be complete. Ask me any questions and update this file a
 
 ## Running the App
 
+The server URL is configured via `--dart-define-from-file`. The file `dfm/dart_defines.json` contains the `DFM_WP_BASE` URL and is gitignored (never commit it). The default in `app_config.dart` is a placeholder — **always** pass the defines file.
+
 ```bash
 # Flutter commands must be run from dfm/ — not the parent
 cd dfm
 
-flutter run -d chrome           # Run on Chrome
-flutter run                     # Run on connected device (single device)
-flutter run -d <device-id>      # Run on specific device
+flutter run -d chrome --dart-define-from-file=dart_defines.json    # Run on Chrome
+flutter run --dart-define-from-file=dart_defines.json              # Run on connected device
+flutter run -d <device-id> --dart-define-from-file=dart_defines.json
 flutter devices                 # List available devices
+
+# Production build
+flutter build web --base-href /dairyapp/ --dart-define-from-file=dart_defines.json
 ```
 
 ---
@@ -165,7 +170,7 @@ Contains shared DTOs and production payload classes:
 
 ---
 
-## PHP Plugin Conventions (`wordpress-backend/dairy-production-api/dairy-production-api.php`)
+## PHP Plugin Conventions (`dfm-backend/dairy-production-api/dairy-production-api.php`)
 
 **Current version:** 3.1.0
 **Class:** `Dairy_Production_API`
@@ -382,6 +387,9 @@ Access to the server is ssh. The pem details are given in an earlier section.
 Path for the site on the server: <your-wp-root>/dairyapp
 The server is accessed through ssh/scp. The pem detailes is given earlier.
 URL accessing the app on the web: https://<your-domain>/dairyapp/
+
+## Source Control
+**CRITICAL: Claude works ONLY with the local copy. Do NOT run ANY git commands — no `git log`, `git status`, `git diff`, `git commit`, `git push`, `git pull`, `git checkout`, or any other git operation. Do NOT interact with any remote repository (GitHub, Bitbucket, or otherwise). The project owner manages ALL version control operations manually. This includes read-only git commands — do not use git to inspect history, check file status, or any other purpose.**
 
 ## User credential for all testing
 See: ../../pem/dairy-mgmt-credentials.txt (outside source control)

@@ -12,18 +12,20 @@ import '../models/models.dart';
 enum DataEntry {
   ffMilkPurchase(
       'FF Milk Purchase',       Icons.water_drop_outlined),
+  ffMilkProcessing(
+      'FF Milk → Cream + Skim', Icons.settings_outlined),
+  pouchProduction(
+      'FF Milk → Cream + Pouches', Icons.local_drink_outlined),
   creamPurchase(
       'Cream Purchase',         Icons.opacity_outlined),
-  butterPurchase(
-      'Butter Purchase',        Icons.kitchen_outlined),
-  smpPurchase(
-      'SMP / Protein / Culture Purchase', Icons.science_outlined),
-  ffMilkProcessing(
-      'FF Milk → Skim + Cream', Icons.settings_outlined),
   creamProcessing(
       'Cream → Butter / Ghee',  Icons.blender_outlined),
+  butterPurchase(
+      'Butter Purchase',        Icons.kitchen_outlined),
   butterProcessing(
       'Butter → Ghee',          Icons.local_fire_department_outlined),
+  smpPurchase(
+      'SMP / Protein / Culture Purchase', Icons.science_outlined),
   dahiProcessing(
       'Dahi Production',        Icons.set_meal_outlined);
 
@@ -104,6 +106,21 @@ class ProductionController extends GetxController {
   final dahiSealCtrl      = TextEditingController(); // auto-mirrored from container
   final dahiOutCtrl       = TextEditingController();
 
+  // ── Flow 5: FF Milk → Cream + Pouches ──────────────────────
+  final pouchCreamOutCtrl = TextEditingController();
+  final pouchCreamFatCtrl = TextEditingController();
+
+  // ── Shared: vendor milk picker state ────────────────────────
+  final milkAvailability   = <VendorMilkAvailability>[].obs;
+  final isLoadingAvail     = false.obs;
+  // Each entry: {'vendor_id': int, 'ff_milk_kg': int, 'ctrl': TextEditingController}
+  final milkUsageRows      = <Map<String, dynamic>>[].obs;
+
+  // ── Shared: pouch types + pouch line state ──────────────────
+  final pouchTypes         = <PouchType>[].obs;
+  // Each entry: {'pouch_type_id': int, 'quantity': int, 'ctrl': TextEditingController}
+  final pouchLineRows      = <Map<String, dynamic>>[].obs;
+
   String get _date => DateFormat('yyyy-MM-dd').format(entryDate.value);
 
   List<TextEditingController> get _all => [
@@ -117,6 +134,7 @@ class ProductionController extends GetxController {
     cultureCtrl, cultureRateCtrl,
     dahiSkimMilkCtrl, dahiSmpCtrl, dahiProteinCtrl, dahiCultureCtrl,
     dahiContainerCtrl, dahiSealCtrl, dahiOutCtrl,
+    pouchCreamOutCtrl, pouchCreamFatCtrl,
   ];
 
   Map<DataEntry, List<TextEditingController>> get _entryFields => {
@@ -133,6 +151,7 @@ class ProductionController extends GetxController {
     DataEntry.dahiProcessing:   [dahiSkimMilkCtrl, dahiSmpCtrl, dahiProteinCtrl,
                                   dahiCultureCtrl, dahiContainerCtrl,
                                   dahiSealCtrl, dahiOutCtrl],
+    DataEntry.pouchProduction:  [pouchCreamOutCtrl, pouchCreamFatCtrl],
   };
 
   // POST endpoint for writing new records.
@@ -146,6 +165,7 @@ class ProductionController extends GetxController {
     DataEntry.butterProcessing => '/butter-ghee',
     DataEntry.smpPurchase      => '/smp-purchase',
     DataEntry.dahiProcessing   => '/dahi',
+    DataEntry.pouchProduction  => '/pouch-production',
   };
 
   @override
@@ -157,12 +177,19 @@ class ProductionController extends GetxController {
       nav.pendingProductionDate = null;
     }
     _loadVendors();
+    _fetchPouchTypes();
     ever(LocationService.instance.selected, (_) {
       _loadVendors();
       _fetchStock();
+      _fetchMilkAvailability();
     });
     ever(entryDate, (_) => _fetchStock());
-    ever(selectedEntry, (_) => _fetchStock());
+    ever(selectedEntry, (_) {
+      _fetchStock();
+      if (_.name == 'ffMilkProcessing' || _.name == 'pouchProduction') {
+        _fetchMilkAvailability();
+      }
+    });
     // Mirror container count → seal count automatically
     dahiContainerCtrl.addListener(() {
       if (dahiSealCtrl.text != dahiContainerCtrl.text) {
@@ -173,7 +200,12 @@ class ProductionController extends GetxController {
   }
 
   @override
-  void onClose() { for (final c in _all) { c.dispose(); } super.onClose(); }
+  void onClose() {
+    for (final c in _all) { c.dispose(); }
+    for (final row in milkUsageRows) { (row['ctrl'] as TextEditingController).dispose(); }
+    for (final row in pouchLineRows) { (row['ctrl'] as TextEditingController).dispose(); }
+    super.onClose();
+  }
 
   Future<void> _loadVendors() async {
     isVendorLoading.value = true;
@@ -191,6 +223,77 @@ class ProductionController extends GetxController {
     isVendorLoading.value = false;
     _fetchStock();
   }
+
+  // ── Milk availability per vendor ──────────────────────────────
+
+  Future<void> _fetchMilkAvailability() async {
+    final locId = LocationService.instance.locId;
+    if (locId == null) return;
+    isLoadingAvail.value = true;
+    final res = await ApiClient.get('/milk-availability?location_id=$locId');
+    if (res.ok) {
+      milkAvailability.value = (res.data as List)
+          .map((e) => VendorMilkAvailability.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+    isLoadingAvail.value = false;
+  }
+
+  void addMilkUsageRow() {
+    milkUsageRows.add({
+      'vendor_id': null as int?,
+      'ff_milk_kg': 0,
+      'ctrl': TextEditingController(),
+    });
+  }
+
+  void removeMilkUsageRow(int index) {
+    if (milkUsageRows.length > 1) {
+      (milkUsageRows[index]['ctrl'] as TextEditingController).dispose();
+      milkUsageRows.removeAt(index);
+    }
+  }
+
+  void resetMilkUsageRows() {
+    for (final row in milkUsageRows) { (row['ctrl'] as TextEditingController).dispose(); }
+    milkUsageRows.clear();
+    addMilkUsageRow();
+  }
+
+  // ── Pouch types ─────────────────────────────────────────────
+
+  Future<void> _fetchPouchTypes() async {
+    final res = await ApiClient.get('/pouch-types');
+    if (res.ok) {
+      pouchTypes.value = (res.data as List)
+          .map((e) => PouchType.fromJson(e as Map<String, dynamic>))
+          .where((p) => p.isActive)
+          .toList();
+    }
+  }
+
+  void addPouchLineRow() {
+    pouchLineRows.add({
+      'pouch_type_id': null as int?,
+      'quantity': 0,
+      'ctrl': TextEditingController(),
+    });
+  }
+
+  void removePouchLineRow(int index) {
+    if (pouchLineRows.length > 1) {
+      (pouchLineRows[index]['ctrl'] as TextEditingController).dispose();
+      pouchLineRows.removeAt(index);
+    }
+  }
+
+  void resetPouchLineRows() {
+    for (final row in pouchLineRows) { (row['ctrl'] as TextEditingController).dispose(); }
+    pouchLineRows.clear();
+    addPouchLineRow();
+  }
+
+  Future<void> refreshPouchTypes() => _fetchPouchTypes();
 
   // ── Fetch running stock balances for all badge products ───────
 
@@ -261,15 +364,23 @@ class ProductionController extends GetxController {
         payload = p;
 
       case DataEntry.ffMilkProcessing:
-        payload  = MilkCreamInput(
-          locationId:   locId, entryDate: _date,
-          ffMilkKg:     0, snf: 0, fat: 0, rate: 0,
-          ffMilkUsedKg: int.tryParse(ffMilkUsedCtrl.text) ?? 0,
-          skimMilkKg:   int.parse(skimMilkCtrl.text),
-          skimSnf:      double.parse(outSkimSnfCtrl.text),
-          creamKg:      int.parse(creamOutCtrl.text),
-          creamFat:     double.parse(creamFatCtrl.text),
-        ).toJson();
+        // Build milk_usage from vendor picker rows
+        final muList = <Map<String, dynamic>>[];
+        for (final row in milkUsageRows) {
+          final vid = row['vendor_id'] as int?;
+          final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
+          if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
+        }
+        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        payload = {
+          'location_id': locId, 'entry_date': _date,
+          'input_ff_milk_kg': 0, 'input_snf': 0, 'input_fat': 0, 'input_rate': 0,
+          'output_skim_milk_kg': int.parse(skimMilkCtrl.text),
+          'output_skim_snf': double.parse(outSkimSnfCtrl.text),
+          'output_cream_kg': int.parse(creamOutCtrl.text),
+          'output_cream_fat': double.parse(creamFatCtrl.text),
+          'milk_usage': muList,
+        };
 
       case DataEntry.creamPurchase:
         final p = CreamInput(
@@ -333,6 +444,31 @@ class ProductionController extends GetxController {
           sealCount:            containers, // always mirrors container count
           outputContainerCount: int.tryParse(dahiOutCtrl.text) ?? 0,
         ).toJson();
+
+      case DataEntry.pouchProduction:
+        // Build milk_usage from vendor picker rows
+        final muList = <Map<String, dynamic>>[];
+        for (final row in milkUsageRows) {
+          final vid = row['vendor_id'] as int?;
+          final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
+          if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
+        }
+        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        // Build pouch lines
+        final plList = <Map<String, dynamic>>[];
+        for (final row in pouchLineRows) {
+          final ptId = row['pouch_type_id'] as int?;
+          final qty  = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
+          if (ptId != null && qty > 0) plList.add({'pouch_type_id': ptId, 'quantity': qty});
+        }
+        if (plList.isEmpty) { errorMessage.value = 'Add at least one pouch type with quantity.'; isLoading.value = false; return; }
+        payload = {
+          'location_id': locId, 'entry_date': _date,
+          'output_cream_kg': int.tryParse(pouchCreamOutCtrl.text) ?? 0,
+          'output_cream_fat': double.tryParse(pouchCreamFatCtrl.text) ?? 0,
+          'milk_usage': muList,
+          'pouch_lines': plList,
+        };
     }
 
     final res = await ApiClient.post(endpoint, payload);
@@ -340,9 +476,12 @@ class ProductionController extends GetxController {
     if (res.ok) {
       for (final c in _entryFields[selectedEntry.value] ?? []) { c.clear(); }
       if (vendors.isNotEmpty) selectedVendorId.value = vendors.first.id;
+      resetMilkUsageRows();
+      resetPouchLineRows();
       errorMessage.value   = '';
       successMessage.value = 'Saved successfully.';
       await _fetchStock();
+      await _fetchMilkAvailability();
     } else {
       errorMessage.value = res.message ?? 'Save failed.';
     }
