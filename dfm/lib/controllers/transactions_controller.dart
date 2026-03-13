@@ -17,6 +17,7 @@ class SaleTx {
   final double total;
   final String createdAt;
   final String userName;
+  final String locationName;
 
   const SaleTx({
     required this.id,
@@ -28,6 +29,7 @@ class SaleTx {
     required this.total,
     required this.createdAt,
     required this.userName,
+    required this.locationName,
   });
 
   factory SaleTx.fromJson(Map<String, dynamic> j) {
@@ -43,6 +45,7 @@ class SaleTx {
       total:        n('total').toDouble(),
       createdAt:    j['created_at']?.toString() ?? '',
       userName:     j['user_name']?.toString() ?? '',
+      locationName: j['location_name']?.toString() ?? '',
     );
   }
 }
@@ -55,6 +58,7 @@ class ProdTx {
   final String date;
   final String createdAt;
   final String userName;
+  final String locationName;
   final Map<String, dynamic> raw; // all fields for detail display
 
   const ProdTx({
@@ -63,16 +67,18 @@ class ProdTx {
     required this.date,
     required this.createdAt,
     required this.userName,
+    required this.locationName,
     required this.raw,
   });
 
   factory ProdTx.fromJson(Map<String, dynamic> j) => ProdTx(
-    id:        num.tryParse(j['id']?.toString() ?? '')?.toInt() ?? 0,
-    type:      j['type']?.toString() ?? '',
-    date:      j['entry_date']?.toString() ?? '',
-    createdAt: j['created_at']?.toString() ?? '',
-    userName:  j['user_name']?.toString() ?? '',
-    raw:       j,
+    id:           num.tryParse(j['id']?.toString() ?? '')?.toInt() ?? 0,
+    type:         j['type']?.toString() ?? '',
+    date:         j['entry_date']?.toString() ?? '',
+    createdAt:    j['created_at']?.toString() ?? '',
+    userName:     j['user_name']?.toString() ?? '',
+    locationName: j['location_name']?.toString() ?? '',
+    raw:          j,
   );
 
   // Human-readable summary line of what this transaction contains
@@ -135,22 +141,34 @@ class SalesTransactionsController extends GetxController {
   final errorMessage = ''.obs;
   final rows         = <SaleTx>[].obs;
   final days         = 7.obs;
+  final reportLocId  = RxnInt();
+
+  int? _effectiveLocId() {
+    final appBarLoc = LocationService.instance.selected.value;
+    if (appBarLoc != null && appBarLoc.code.toLowerCase() == 'test') {
+      return appBarLoc.id;
+    }
+    return reportLocId.value;
+  }
 
   @override
   void onInit() {
     super.onInit();
     fetchReport();
-    ever(LocationService.instance.selected, (_) => fetchReport());
+    ever(LocationService.instance.selected, (_) {
+      reportLocId.value = null;
+      fetchReport();
+    });
   }
 
   Future<void> fetchReport() async {
-    final locId = LocationService.instance.locId;
-    if (locId == null) return;
     isLoading.value    = true;
     errorMessage.value = '';
     try {
+      final locId = _effectiveLocId();
+      final locParam = locId != null ? '?location_id=$locId' : '';
       final res = await ApiClient.get(
-          '/sales-transactions?location_id=$locId');
+          '/sales-transactions$locParam');
       isLoading.value = false;
       if (!res.ok) {
         errorMessage.value = res.message ?? 'Error loading transactions.';
@@ -175,22 +193,34 @@ class ProductionTransactionsController extends GetxController {
   final errorMessage = ''.obs;
   final rows         = <ProdTx>[].obs;
   final days         = 7.obs;
+  final reportLocId  = RxnInt();
+
+  int? _effectiveLocId() {
+    final appBarLoc = LocationService.instance.selected.value;
+    if (appBarLoc != null && appBarLoc.code.toLowerCase() == 'test') {
+      return appBarLoc.id;
+    }
+    return reportLocId.value;
+  }
 
   @override
   void onInit() {
     super.onInit();
     fetchReport();
-    ever(LocationService.instance.selected, (_) => fetchReport());
+    ever(LocationService.instance.selected, (_) {
+      reportLocId.value = null;
+      fetchReport();
+    });
   }
 
   Future<void> fetchReport() async {
-    final locId = LocationService.instance.locId;
-    if (locId == null) return;
     isLoading.value    = true;
     errorMessage.value = '';
     try {
+      final locId = _effectiveLocId();
+      final locParam = locId != null ? '?location_id=$locId' : '';
       final res = await ApiClient.get(
-          '/production-transactions?location_id=$locId');
+          '/production-transactions$locParam');
       isLoading.value = false;
       if (!res.ok) {
         errorMessage.value = res.message ?? 'Error loading transactions.';

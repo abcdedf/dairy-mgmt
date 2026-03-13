@@ -73,6 +73,10 @@ class _DailySalesReportPageState extends State<DailySalesReportPage> {
         ],
       ),
       body: SelectionArea(child: Column(children: [
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchReport(),
+        ),
         // Product dropdown
         Container(
           width: double.infinity,
@@ -145,11 +149,13 @@ class _ReportGridState extends State<_ReportGrid> {
     final rows     = ctrl.rows;
     final dateFmt  = DateFormat('dd MMM');
     final inrFmt   = NumberFormat('#,##,##0', 'en_IN');
+    final showLoc  = rows.any((r) => r.locationName != null);
 
     const dateW  = 72.0;
+    const locW   = 90.0;
     const colW   = 90.0;
     const totalW = 90.0;
-    final gridW  = dateW + colW * colOrder.length + totalW;
+    final gridW  = dateW + (showLoc ? locW : 0) + colW * colOrder.length + totalW;
 
     return Column(children: [
       Container(
@@ -168,6 +174,7 @@ class _ReportGridState extends State<_ReportGrid> {
             width: gridW,
             child: Row(children: [
               _hdr('Date', dateW),
+              if (showLoc) _hdr('Location', locW),
               ...colOrder.map((pid) =>
                   _hdr(names[pid] ?? '?', colW)),
               _hdr('Total \u20B9', totalW),
@@ -186,6 +193,7 @@ class _ReportGridState extends State<_ReportGrid> {
               children: [
                 Row(children: [
                   const SizedBox(width: dateW),
+                  if (showLoc) const SizedBox(width: locW),
                   ...colOrder.map((_) => Row(children: [
                     SizedBox(
                       width: colW / 2,
@@ -226,6 +234,19 @@ class _ReportGridState extends State<_ReportGrid> {
                                 style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                          if (showLoc) SizedBox(
+                            width: locW, height: 44,
+                            child: Center(
+                              child: Text(
+                                row.locationName ?? '',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey.shade700),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ),
@@ -339,9 +360,10 @@ class _SalesLedgerPageState extends State<SalesLedgerPage> {
 
   void _exportCsv() {
     if (ctrl.rows.isEmpty) return;
-    const headers = ['Date', 'Customer', 'Product', 'Qty', 'Rate', 'Total'];
+    const headers = ['Date', 'Location', 'Customer', 'Product', 'Qty', 'Rate', 'Total'];
     final csvRows = ctrl.rows.map((r) => [
       r.date,
+      r.locationName,
       r.customerName,
       r.productName,
       r.quantity.toStringAsFixed(2),
@@ -377,6 +399,10 @@ class _SalesLedgerPageState extends State<SalesLedgerPage> {
         ],
       ),
       body: SelectionArea(child: Column(children: [
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchReport(),
+        ),
         // Customer dropdown
         Container(
           width: double.infinity,
@@ -470,12 +496,13 @@ class _SalesTableState extends State<_SalesTable> {
     final ifmt = widget.inrFmt;
 
     const dateW = 68.0;
+    const locW  = 90.0;
     const custW = 110.0;
     const prodW = 80.0;
     const rateW = 80.0;
     const qtyW  = 60.0;
     const totW  = 90.0;
-    const gridW = dateW + custW + prodW + rateW + qtyW + totW;
+    const gridW = dateW + locW + custW + prodW + rateW + qtyW + totW;
 
     Widget hdr(String t, double w) => SizedBox(
       width: w, height: 40,
@@ -511,6 +538,7 @@ class _SalesTableState extends State<_SalesTable> {
           physics: const ClampingScrollPhysics(),
           child: SizedBox(width: gridW, child: Row(children: [
             hdr('Date', dateW),
+            hdr('Location', locW),
             hdr('Customer', custW),
             hdr('Product', prodW),
             hdr('Rate', rateW),
@@ -535,6 +563,7 @@ class _SalesTableState extends State<_SalesTable> {
                     color: isEven ? Colors.white : const Color(0xFFF8F9FA),
                     child: Row(children: [
                       cell(dfmt.format(DateTime.parse(r.date)), dateW, bold: true),
+                      cell(r.locationName, locW, align: TextAlign.left),
                       cell(r.customerName, custW, align: TextAlign.left),
                       cell(r.productName, prodW),
                       cell(ifmt.format(r.rate), rateW),

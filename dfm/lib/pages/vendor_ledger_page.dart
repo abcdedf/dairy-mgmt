@@ -31,232 +31,28 @@ class _VendorLedgerPageState extends State<VendorLedgerPage> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final inrFmt = NumberFormat('#,##,##0.00', 'en_IN');
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Vendor Ledger'),
-        backgroundColor: _kTeal,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.download_outlined),
-            onPressed: () => _exportLedgerCsv(ctrl),
-            tooltip: 'Export CSV',
-          ),
-        ],
-      ),
-      body: SelectionArea(child: Obx(() {
-        if (ctrl.isLoading.value) return const LoadingCenter();
-        if (ctrl.errorMessage.value.isNotEmpty) {
-          return EmptyState(
-            icon: Icons.error_outline,
-            message: ctrl.errorMessage.value,
-            buttonLabel: 'Retry',
-            onButton: ctrl.fetchLedger,
-          );
-        }
-        if (ctrl.vendors.isEmpty) {
-          return const EmptyState(
-            icon: Icons.account_balance_wallet_outlined,
-            message: 'No vendor activity found.',
-          );
-        }
-        return RefreshIndicator(
-          onRefresh: ctrl.fetchLedger,
-          child: ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: ctrl.vendors.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, i) {
-              final v = ctrl.vendors[i];
-              return Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => _VendorDetailPage(vendorId: v.vendorId),
-                  )),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Expanded(child: Text(v.vendorName,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w700, fontSize: 15))),
-                          Icon(Icons.chevron_right,
-                              color: Colors.grey.shade400),
-                        ]),
-                        const SizedBox(height: 10),
-                        Row(children: [
-                          _SummaryChip('Purchases',
-                              inrFmt.format(v.totalPurchases),
-                              const Color(0xFF1A73E8)),
-                          const SizedBox(width: 8),
-                          _SummaryChip('Paid',
-                              inrFmt.format(v.totalPayments),
-                              kGreen),
-                          const SizedBox(width: 8),
-                          _SummaryChip('Due',
-                              inrFmt.format(v.balanceDue),
-                              v.balanceDue > 0 ? kRed : kGreen),
-                        ]),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      })),
-    );
-  }
-}
-
-void _exportLedgerCsv(VendorLedgerController c) {
-  if (c.vendors.isEmpty) return;
-  const headers = ['Vendor', 'Total Purchases', 'Total Payments', 'Balance Due'];
-  final rows = c.vendors.map((v) => [
-    v.vendorName,
-    v.totalPurchases.toStringAsFixed(2),
-    v.totalPayments.toStringAsFixed(2),
-    v.balanceDue.toStringAsFixed(2),
-  ]).toList();
-  exportCsv(fileName: 'vendor_ledger.csv', headers: headers, rows: rows);
-}
-
-class _SummaryChip extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color  color;
-  const _SummaryChip(this.label, this.value, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-          const SizedBox(height: 2),
-          Text(value, style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w600, color: color)),
-        ],
-      ),
-    );
-  }
-}
-
-// ────────────────────────────────────────────────────
-// DETAIL PAGE — now with vendor dropdown + flat table
-// ────────────────────────────────────────────────────
-
-class _VendorDetailPage extends StatelessWidget {
-  final int vendorId;
-  const _VendorDetailPage({required this.vendorId});
-
-  @override
-  Widget build(BuildContext context) {
-    final ctrl   = Get.find<VendorLedgerController>();
-    final inrFmt = NumberFormat('#,##,##0.00', 'en_IN');
-    ctrl.fetchDetail(vendorId);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Obx(() => Text(ctrl.detailVendorName.value.isNotEmpty
-            ? ctrl.detailVendorName.value : 'Vendor Detail')),
-        backgroundColor: _kTeal,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.download_outlined),
-            onPressed: () => _exportDetailCsv(ctrl, inrFmt),
-            tooltip: 'Export CSV',
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showPaymentSheet(context, ctrl),
-        backgroundColor: _kTeal,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Record Payment'),
-      ),
-      body: SelectionArea(child: Obx(() {
-        if (ctrl.isLoadingDetail.value) return const LoadingCenter();
-        if (ctrl.errorMessage.value.isNotEmpty) {
-          return EmptyState(
-            icon: Icons.error_outline,
-            message: ctrl.errorMessage.value,
-            buttonLabel: 'Retry',
-            onButton: () => ctrl.fetchDetail(ctrl.selectedVendorId.value),
-          );
-        }
-        return Column(children: [
-          // ── Vendor dropdown ──
-          if (ctrl.vendorList.isNotEmpty)
-            Container(
-              width: double.infinity,
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Obx(() => DropdownButtonFormField<int>(
-                initialValue: ctrl.selectedVendorId.value,
-                decoration: const InputDecoration(
-                  labelText: 'Vendor',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-                items: [
-                  const DropdownMenuItem(value: 0, child: Text('All Vendors')),
-                  ...ctrl.vendorList.map((v) =>
-                      DropdownMenuItem(value: v.id, child: Text(v.name))),
-                ],
-                onChanged: (v) {
-                  if (v != null) ctrl.fetchDetail(v);
-                },
-              )),
-            ),
-          // ── Summary header ──
-          Container(
-            width: double.infinity,
-            color: Colors.grey.shade50,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(children: [
-              _SummaryChip('Purchases',
-                  inrFmt.format(ctrl.detailPurchases.value),
-                  const Color(0xFF1A73E8)),
-              const SizedBox(width: 8),
-              _SummaryChip('Paid',
-                  inrFmt.format(ctrl.detailPayments.value),
-                  kGreen),
-              const SizedBox(width: 8),
-              _SummaryChip('Due',
-                  inrFmt.format(ctrl.detailBalance.value),
-                  ctrl.detailBalance.value > 0 ? kRed : kGreen),
-            ]),
-          ),
-          // ── Flat transaction table ──
-          Expanded(child: _TransactionTable(ctrl: ctrl, inrFmt: inrFmt)),
-        ]);
-      })),
-    );
+  void _exportCsv() {
+    if (ctrl.rows.isEmpty) return;
+    const headers = ['Date', 'Location', 'Vendor', 'Purchases', 'Payments', 'Balance'];
+    final csvRows = ctrl.rows.map((r) => [
+      r.date,
+      r.locationName,
+      r.vendorName,
+      r.purchases.toStringAsFixed(2),
+      r.payments.toStringAsFixed(2),
+      r.balance.toStringAsFixed(2),
+    ]).toList();
+    exportCsv(fileName: 'vendor_ledger.csv', headers: headers, rows: csvRows);
   }
 
-  void _showPaymentSheet(BuildContext context, VendorLedgerController ctrl) {
+  void _showPaymentSheet(BuildContext context) {
     final amountCtrl = TextEditingController();
     final noteCtrl   = TextEditingController();
     final method     = 'Cash'.obs;
     final date       = DateTime.now().obs;
     final methods    = ['Cash', 'Bank Transfer', 'UPI', 'Cheque'];
     final dateFmt    = DateFormat('dd MMM yyyy');
+    final payVendorId = ctrl.selectedVendorId.value.obs;
 
     showModalBottomSheet(
       context: context,
@@ -274,6 +70,18 @@ class _VendorDetailPage extends StatelessWidget {
             const Text('Record Payment',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 16),
+            // Vendor selector
+            Obx(() => DropdownButtonFormField<int>(
+              value: payVendorId.value > 0 ? payVendorId.value : null,
+              decoration: const InputDecoration(
+                labelText: 'Vendor',
+                border: OutlineInputBorder(),
+              ),
+              items: ctrl.vendorList.map((v) =>
+                  DropdownMenuItem(value: v.id, child: Text(v.name))).toList(),
+              onChanged: (v) { if (v != null) payVendorId.value = v; },
+            )),
+            const SizedBox(height: 12),
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -332,14 +140,12 @@ class _VendorDetailPage extends StatelessWidget {
                     ctrl.errorMessage.value = 'Enter a valid amount.';
                     return;
                   }
-                  // Use the currently selected vendor for payment
-                  final payVendorId = ctrl.selectedVendorId.value;
-                  if (payVendorId == 0) {
-                    ctrl.errorMessage.value = 'Select a specific vendor for payment.';
+                  if (payVendorId.value == 0) {
+                    ctrl.errorMessage.value = 'Select a vendor for payment.';
                     return;
                   }
                   final ok = await ctrl.savePayment(
-                    vendorId: payVendorId,
+                    vendorId: payVendorId.value,
                     date: date.value,
                     amount: amount,
                     method: method.value,
@@ -353,7 +159,6 @@ class _VendorDetailPage extends StatelessWidget {
                         snackPosition: SnackPosition.BOTTOM,
                         duration: const Duration(seconds: 2),
                         margin: const EdgeInsets.all(12));
-                    ctrl.fetchDetail(ctrl.selectedVendorId.value);
                     ctrl.fetchLedger();
                   }
                 },
@@ -371,122 +176,197 @@ class _VendorDetailPage extends StatelessWidget {
     );
   }
 
-  void _exportDetailCsv(VendorLedgerController c, NumberFormat fmt) {
-    if (c.transactions.isEmpty) return;
-    final showVendor = c.selectedVendorId.value == 0;
-    final headers = [
-      'Date',
-      'Type',
-      if (showVendor) 'Vendor',
-      'Product',
-      'Qty',
-      'Rate',
-      'Amount',
-      'Method',
-      'Note',
-    ];
-    final csvRows = c.transactions.map((tx) => [
-      tx.date,
-      tx.type,
-      if (showVendor) tx.vendorName ?? '',
-      tx.product ?? '',
-      tx.quantity?.toStringAsFixed(2) ?? '',
-      tx.rate?.toStringAsFixed(2) ?? '',
-      tx.amount.toStringAsFixed(2),
-      tx.method ?? '',
-      tx.note ?? '',
-    ]).toList();
-    exportCsv(fileName: 'vendor_ledger_detail.csv', headers: headers, rows: csvRows);
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F7FA),
+      appBar: AppBar(
+        title: const Text('Vendor Ledger',
+            style: TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor: _kTeal,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download_outlined),
+            onPressed: _exportCsv,
+            tooltip: 'Export CSV',
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: ctrl.fetchLedger,
+            tooltip: 'Refresh',
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showPaymentSheet(context),
+        backgroundColor: _kTeal,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Payment'),
+      ),
+      body: SelectionArea(child: Column(children: [
+        // Location dropdown
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchLedger(),
+        ),
+        // Vendor dropdown
+        Obx(() {
+          if (ctrl.vendorList.isEmpty) return const SizedBox.shrink();
+          return Container(
+            width: double.infinity,
+            color: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: DropdownButtonFormField<int>(
+              initialValue: ctrl.selectedVendorId.value,
+              decoration: const InputDecoration(
+                labelText: 'Vendor',
+                border: OutlineInputBorder(),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              items: [
+                const DropdownMenuItem(value: 0, child: Text('All Vendors')),
+                ...ctrl.vendorList.map((v) =>
+                    DropdownMenuItem(value: v.id, child: Text(v.name))),
+              ],
+              onChanged: (v) {
+                ctrl.selectedVendorId.value = v ?? 0;
+                ctrl.fetchLedger();
+              },
+            ),
+          );
+        }),
+        // Body
+        Expanded(child: Obx(() {
+          if (ctrl.isLoading.value) return const LoadingCenter();
+          if (ctrl.errorMessage.value.isNotEmpty) {
+            return EmptyState(
+              icon: Icons.error_outline,
+              message: ctrl.errorMessage.value,
+              buttonLabel: 'Retry',
+              onButton: ctrl.fetchLedger,
+            );
+          }
+          if (ctrl.rows.isEmpty) {
+            return const EmptyState(
+              icon: Icons.account_balance_wallet_outlined,
+              message: 'No vendor activity found.',
+            );
+          }
+          return _LedgerGrid(rows: ctrl.rows);
+        })),
+      ])),
+    );
   }
 }
 
-// ── Flat transaction table ──────────────────────────────────
+// ── Grid ──────────────────────────────────────────────────────
 
-class _TransactionTable extends StatelessWidget {
-  final VendorLedgerController ctrl;
-  final NumberFormat inrFmt;
-  const _TransactionTable({required this.ctrl, required this.inrFmt});
+class _LedgerGrid extends StatefulWidget {
+  final List<VendorLedgerRow> rows;
+  const _LedgerGrid({required this.rows});
+
+  @override
+  State<_LedgerGrid> createState() => _LedgerGridState();
+}
+
+class _LedgerGridState extends State<_LedgerGrid> {
+  final _hScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _hScroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final txs = ctrl.transactions;
-    if (txs.isEmpty) {
-      return const EmptyState(
-        icon: Icons.receipt_long_outlined,
-        message: 'No transactions found.',
-      );
-    }
-    final showVendor = ctrl.selectedVendorId.value == 0;
+    final rows    = widget.rows;
     final dateFmt = DateFormat('dd MMM');
+    final inrFmt  = NumberFormat('#,##,##0', 'en_IN');
+    final showLoc = rows.any((r) => r.locationName.isNotEmpty);
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(8),
-      itemCount: txs.length,
-      itemBuilder: (_, i) {
-        final tx = txs[i];
-        final isPurchase = tx.type == 'purchase';
-        return Card(
-          margin: const EdgeInsets.only(bottom: 6),
-          color: isPurchase ? Colors.white : const Color(0xFFF1F8E9),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(children: [
-              // Icon
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: isPurchase
-                      ? const Color(0xFF1A73E8).withValues(alpha: 0.12)
-                      : kGreen.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  isPurchase ? Icons.shopping_cart_outlined : Icons.payments_outlined,
-                  color: isPurchase ? const Color(0xFF1A73E8) : kGreen,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              // Details
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isPurchase)
-                    Text(
-                      '${showVendor && tx.vendorName != null ? '${tx.vendorName} — ' : ''}'
-                      '${tx.product ?? ''} — ${tx.quantity?.toInt() ?? 0} KG @ ${inrFmt.format(tx.rate ?? 0)}',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                    )
-                  else
-                    Text(
-                      '${showVendor && tx.vendorName != null ? '${tx.vendorName} — ' : ''}'
-                      'Payment — ${tx.method ?? ''}',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${dateFmt.format(DateTime.parse(tx.date))}'
-                    '${tx.locationName != null ? '  •  ${tx.locationName}' : ''}'
-                    '${tx.userName != null ? '  •  ${tx.userName}' : ''}'
-                    '${tx.note != null && tx.note!.isNotEmpty ? '  •  ${tx.note}' : ''}',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                  ),
-                ],
-              )),
-              // Amount
-              Text(
-                '${isPurchase ? '' : '- '}${inrFmt.format(tx.amount)}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: isPurchase ? const Color(0xFF1A73E8) : kGreen,
-                  fontSize: 13,
-                ),
-              ),
-            ]),
-          ),
-        );
-      },
+    const dateW   = 64.0;
+    const locW    = 80.0;
+    const vendW   = 120.0;
+    const numW    = 100.0;
+    final gridW   = dateW + (showLoc ? locW : 0) + vendW + numW * 3;
+
+    Widget hdr(String t, double w) => SizedBox(
+      width: w, height: 40,
+      child: Center(child: Text(t,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11),
+          maxLines: 2, overflow: TextOverflow.ellipsis)),
     );
+
+    Widget cell(String text, double w, {Color? color, bool bold = false}) => SizedBox(
+      width: w, height: 48,
+      child: Center(child: Text(text,
+          textAlign: TextAlign.center,
+          maxLines: 2, overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 11, color: color ?? const Color(0xFF2C3E50),
+              fontWeight: bold ? FontWeight.w700 : FontWeight.normal))),
+    );
+
+    String fmt(double v) => '${v < 0 ? '-' : ''}${inrFmt.format(v.abs())}';
+
+    return Column(children: [
+      // Frozen header
+      Container(
+        decoration: BoxDecoration(
+          color: _kTeal,
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 4, offset: const Offset(0, 2))],
+        ),
+        child: SingleChildScrollView(
+          controller: _hScroll,
+          scrollDirection: Axis.horizontal,
+          physics: const ClampingScrollPhysics(),
+          child: SizedBox(width: gridW, child: Row(children: [
+            hdr('Date', dateW),
+            if (showLoc) hdr('Location', locW),
+            hdr('Vendor', vendW),
+            hdr('Purchases', numW),
+            hdr('Payments', numW),
+            hdr('Balance', numW),
+          ])),
+        ),
+      ),
+      // Body
+      Expanded(
+        child: SyncedHorizontalBody(
+          hScroll: _hScroll,
+          gridWidth: gridW,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: List.generate(rows.length, (i) {
+                final r = rows[i];
+                final isEven = i.isEven;
+                final balColor = r.balance > 0 ? kRed : (r.balance < 0 ? kGreen : null);
+                return Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    color: isEven ? Colors.white : const Color(0xFFF8F9FA),
+                    child: Row(children: [
+                      cell(dateFmt.format(DateTime.parse(r.date)), dateW, bold: true),
+                      if (showLoc) cell(r.locationName, locW),
+                      cell(r.vendorName, vendW),
+                      cell(fmt(r.purchases), numW, color: const Color(0xFF1A73E8)),
+                      cell(r.payments > 0 ? fmt(r.payments) : '', numW, color: kGreen),
+                      cell(fmt(r.balance), numW, bold: true, color: balColor),
+                    ]),
+                  ),
+                  if (i < rows.length - 1)
+                    Divider(height: 1, color: Colors.grey.shade200),
+                ]);
+              }),
+            ),
+          ),
+        ),
+      ),
+    ]);
   }
 }

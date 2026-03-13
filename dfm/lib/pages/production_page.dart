@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import '../controllers/production_controller.dart';
+import '../controllers/transactions_controller.dart';
 import 'shared_widgets.dart';
 
 class ProductionPage extends StatelessWidget {
@@ -31,65 +32,79 @@ class _ProductionBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return Obx(() {
       if (ctrl.isVendorLoading.value) return const LoadingCenter();
-      return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+      return Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620),
+          child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
 
-              // ── Date ────────────────────────────────────────
-              DCard(child: Obx(() => InkWell(
-                onTap: () => ctrl.pickDate(context),
-                child: InputDecorator(
-                  decoration: fieldDec('Date',
-                      prefixIcon: Icons.calendar_today_outlined),
-                  child: Text(
-                    DateFormat('dd MMM yyyy').format(ctrl.entryDate.value),
-                    style: const TextStyle(fontSize: 15),
+              // ── Date + Data type on one row ──────────────────
+              DCard(child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Date picker
+                  Expanded(
+                    flex: 2,
+                    child: Obx(() => InkWell(
+                      onTap: () => ctrl.pickDate(context),
+                      child: InputDecorator(
+                        decoration: fieldDec('Date',
+                            prefixIcon: Icons.calendar_today_outlined),
+                        child: Text(
+                          DateFormat('dd MMM yyyy').format(ctrl.entryDate.value),
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    )),
                   ),
-                ),
-              ))),
+                  const SizedBox(width: 12),
+                  // Data type dropdown
+                  Expanded(
+                    flex: 3,
+                    child: Obx(() {
+                      final flows = ctrl.flowDefs;
+                      if (flows.isEmpty) {
+                        return DropdownButtonFormField<DataEntry>(
+                          initialValue: ctrl.selectedEntry.value,
+                          isExpanded: true,
+                          decoration: fieldDec('Activity',
+                              prefixIcon: Icons.edit_note_outlined),
+                          items: DataEntry.values.map((e) => DropdownMenuItem(
+                            value: e,
+                            child: Text(e.label,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13)),
+                          )).toList(),
+                          onChanged: (v) {
+                            if (v != null) ctrl.selectedEntry.value = v;
+                          },
+                        );
+                      }
+                      return DropdownButtonFormField<DataEntry>(
+                        initialValue: ctrl.selectedEntry.value,
+                        isExpanded: true,
+                        decoration: fieldDec('Activity',
+                            prefixIcon: Icons.edit_note_outlined),
+                        items: flows.map((f) => DropdownMenuItem(
+                          value: f.entry,
+                          child: Text(f.label,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13)),
+                        )).toList(),
+                        onChanged: (v) {
+                          if (v != null) ctrl.selectedEntry.value = v;
+                        },
+                      );
+                    }),
+                  ),
+                ],
+              )),
 
-              const SizedBox(height: 12),
-
-              // ── Data type dropdown ───────────────────────────
-              DCard(child: Obx(() {
-                final flows = ctrl.flowDefs;
-                if (flows.isEmpty) {
-                  return DropdownButtonFormField<DataEntry>(
-                    initialValue: ctrl.selectedEntry.value,
-                    isExpanded: true,
-                    decoration: fieldDec('Data',
-                        prefixIcon: Icons.edit_note_outlined),
-                    items: DataEntry.values.map((e) => DropdownMenuItem(
-                      value: e,
-                      child: Text(e.label,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13)),
-                    )).toList(),
-                    onChanged: (v) {
-                      if (v != null) ctrl.selectedEntry.value = v;
-                    },
-                  );
-                }
-                return DropdownButtonFormField<DataEntry>(
-                  initialValue: ctrl.selectedEntry.value,
-                  isExpanded: true,
-                  decoration: fieldDec('Data',
-                      prefixIcon: Icons.edit_note_outlined),
-                  items: flows.map((f) => DropdownMenuItem(
-                    value: f.entry,
-                    child: Text(f.label,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13)),
-                  )).toList(),
-                  onChanged: (v) {
-                    if (v != null) ctrl.selectedEntry.value = v;
-                  },
-                );
-              })),
-
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
 
               // ── Active form ──────────────────────────────────
               Obx(() {
@@ -97,7 +112,7 @@ class _ProductionBody extends StatelessWidget {
                 return _EntryForm(ctrl: ctrl, entry: entry);
               }),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
 
               // ── Feedback ─────────────────────────────────────
               Obx(() {
@@ -143,6 +158,8 @@ class _ProductionBody extends StatelessWidget {
               const SizedBox(height: 32),
             ],
           ),
+        ),
+        ),
         );
       });
   }
@@ -159,25 +176,12 @@ class _EntryForm extends StatelessWidget {
   Widget build(BuildContext context) {
     return FocusTraversalGroup(
       child: DCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Form(
           key: ctrl.formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(children: [
-                Icon(entry.icon, size: 18, color: kNavy),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    entry.label,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: kNavy),
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 16),
               ..._fields(),
             ],
           ),
@@ -198,13 +202,10 @@ class _EntryForm extends StatelessWidget {
                 value: v.id, child: Text(v.name))).toList(),
             onChanged: (id) => ctrl.selectedVendorId.value = id,
           )),
-          const SizedBox(height: 12),
-          Row2(
+          const SizedBox(height: 8),
+          _Row4(
             IntField(ctrl.ffMilkCtrl, 'FF Milk', 'KG'),
             RateField(ctrl.rateCtrl, 'Rate'),
-          ),
-          const SizedBox(height: 12),
-          Row2(
             SnfFatField(ctrl.inSnfCtrl, 'SNF'),
             SnfFatField(ctrl.inFatCtrl, 'Fat'),
           ),
@@ -219,10 +220,9 @@ class _EntryForm extends StatelessWidget {
                 value: v.id, child: Text(v.name))).toList(),
             onChanged: (id) => ctrl.selectedVendorId.value = id,
           )),
-          const SizedBox(height: 12),
-          IntField(ctrl.creamInCtrl, 'Cream', 'KG'),
-          const SizedBox(height: 12),
-          Row2(
+          const SizedBox(height: 8),
+          _Row3(
+            IntField(ctrl.creamInCtrl, 'Cream', 'KG'),
             SnfFatField(ctrl.creamInFatCtrl, 'Fat'),
             RateField(ctrl.creamInRateCtrl, 'Rate'),
           ),
@@ -231,7 +231,7 @@ class _EntryForm extends StatelessWidget {
       case DataEntry.butterPurchase:
         return [
           _StockBadge(stock: ctrl.stockButter, label: 'Butter in stock'),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Obx(() => DropdownButtonFormField<int>(
             initialValue: ctrl.selectedVendorId.value,
             decoration: fieldDec('Vendor', prefixIcon: Icons.storefront_outlined),
@@ -239,10 +239,9 @@ class _EntryForm extends StatelessWidget {
                 value: v.id, child: Text(v.name))).toList(),
             onChanged: (id) => ctrl.selectedVendorId.value = id,
           )),
-          const SizedBox(height: 12),
-          IntField(ctrl.butterInCtrl, 'Butter', 'KG'),
-          const SizedBox(height: 12),
-          Row2(
+          const SizedBox(height: 8),
+          _Row3(
+            IntField(ctrl.butterInCtrl, 'Butter', 'KG'),
             SnfFatField(ctrl.butterInFatCtrl, 'Fat'),
             RateField(ctrl.butterInRateCtrl, 'Rate'),
           ),
@@ -250,16 +249,20 @@ class _EntryForm extends StatelessWidget {
 
       case DataEntry.ffMilkProcessing:
         return [
-          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
-          const SizedBox(height: 10),
+          _CompactStockLine(items: [
+            _StockItem('FF Milk', ctrl.stockFfMilk, 'KG'),
+          ]),
+          const SizedBox(height: 4),
+          _CompactStockLine(label: 'Output Stock', items: [
+            _StockItem('Skim Milk', ctrl.stockSkimMilk, 'KG'),
+            _StockItem('Cream', ctrl.stockCream, 'KG'),
+          ]),
+          const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
-          const SizedBox(height: 12),
-          Row2(
+          const SizedBox(height: 8),
+          _Row4(
             IntField(ctrl.skimMilkCtrl, 'Skim Milk', 'KG'),
             SnfFatField(ctrl.outSkimSnfCtrl, 'SNF'),
-          ),
-          const SizedBox(height: 12),
-          Row2(
             IntField(ctrl.creamOutCtrl, 'Cream', 'KG'),
             SnfFatField(ctrl.creamFatCtrl, 'Fat'),
           ),
@@ -267,149 +270,118 @@ class _EntryForm extends StatelessWidget {
 
       case DataEntry.creamProcessing:
         return [
-          _StockBadge(stock: ctrl.stockCream, label: 'Cream in stock'),
-          const SizedBox(height: 10),
-          IntField(ctrl.creamUsedCtrl, 'Cream Used', 'KG'),
+          _CompactStockLine(items: [
+            _StockItem('Cream', ctrl.stockCream, 'KG'),
+          ]),
           const SizedBox(height: 4),
-          Text('From stock — reduces Cream balance.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          const SizedBox(height: 12),
+          _CompactStockLine(label: 'Output Stock', items: [
+            _StockItem('Butter', ctrl.stockButter, 'KG'),
+          ]),
+          const SizedBox(height: 8),
+          Row2(
+            IntField(ctrl.creamUsedCtrl, 'Cream Used', 'KG'),
+            IntField(ctrl.gheeOutCtrl, 'Ghee', 'KG'),
+          ),
+          const SizedBox(height: 8),
           Row2(
             IntField(ctrl.butterOutCtrl, 'Butter', 'KG'),
             SnfFatField(ctrl.butterFatCtrl, 'Fat'),
           ),
-          const SizedBox(height: 12),
-          IntField(ctrl.gheeOutCtrl, 'Ghee', 'KG'),
-          const SizedBox(height: 12),
-          _StockBadge(stock: ctrl.stockButter, label: 'Butter in stock'),
         ];
 
       case DataEntry.smpPurchase:
         return [
-          // FIX 1 & 2: _StockBadge now accepts optional unit param
-          _StockBadge(stock: ctrl.stockSmp,     label: 'SMP in stock',     unit: 'Bags'),
-          const SizedBox(height: 6),
-          _StockBadge(stock: ctrl.stockProtein, label: 'Protein in stock'),
-          const SizedBox(height: 6),
-          _StockBadge(stock: ctrl.stockCulture, label: 'Culture in stock'),
-          const SizedBox(height: 10),
-          Text('Enter at least one non-zero value.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          const SizedBox(height: 12),
+          _CompactStockLine(items: [
+            _StockItem('SMP', ctrl.stockSmp, 'Bags'),
+            _StockItem('Protein', ctrl.stockProtein, 'KG'),
+            _StockItem('Culture', ctrl.stockCulture, 'KG'),
+            _StockItem('Matka', ctrl.stockMatka, 'pcs'),
+          ]),
+          const SizedBox(height: 8),
           Row2(
             IntField(ctrl.smpCtrl,      'SMP',  'Bags', optional: true),
             RateField(ctrl.smpRateCtrl, 'SMP Rate', optional: true),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row2(
             DecimalKgField(ctrl.proteinCtrl,     'Protein', optional: true),
             RateField(ctrl.proteinRateCtrl, 'Protein Rate', optional: true),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row2(
             DecimalKgField(ctrl.cultureCtrl,     'Culture', optional: true),
             RateField(ctrl.cultureRateCtrl, 'Culture Rate', optional: true),
+          ),
+          const SizedBox(height: 8),
+          Row2(
+            IntField(ctrl.matkaCtrl,     'Matka', 'pcs', optional: true),
+            RateField(ctrl.matkaRateCtrl, 'Matka Rate', optional: true),
           ),
         ];
 
       case DataEntry.butterProcessing:
         return [
           _StockBadge(stock: ctrl.stockButter, label: 'Butter in stock'),
-          const SizedBox(height: 10),
-          IntField(ctrl.butterUsedCtrl, 'Butter Used', 'KG'),
-          const SizedBox(height: 4),
-          Text('From stock — reduces Butter balance.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          const SizedBox(height: 12),
-          IntField(ctrl.gheeOut3Ctrl, 'Ghee', 'KG'),
+          const SizedBox(height: 8),
+          Row2(
+            IntField(ctrl.butterUsedCtrl, 'Butter Used', 'KG'),
+            IntField(ctrl.gheeOut3Ctrl, 'Ghee', 'KG'),
+          ),
         ];
 
       case DataEntry.pouchProduction:
         return [
           _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row2(
             IntField(ctrl.pouchCreamOutCtrl, 'Cream Out', 'KG'),
             SnfFatField(ctrl.pouchCreamFatCtrl, 'Cream Fat'),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           _PouchLinePicker(ctrl: ctrl),
         ];
 
       case DataEntry.curdProduction:
         return [
-          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
-          const SizedBox(height: 10),
+          _CompactStockLine(items: [
+            _StockItem('FF Milk', ctrl.stockFfMilk, 'KG'),
+            _StockItem('SMP', ctrl.stockSmp, 'Bags'),
+            _StockItem('Protein', ctrl.stockProtein, 'KG'),
+            _StockItem('Culture', ctrl.stockCulture, 'KG'),
+            _StockItem('Matka', ctrl.stockMatka, 'pcs'),
+          ]),
+          const SizedBox(height: 4),
+          _CompactStockLine(label: 'Output Stock', items: [
+            _StockItem('Cream', ctrl.stockCream, 'KG'),
+            _StockItem('Curd', ctrl.stockCurd, 'pcs'),
+          ]),
+          const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
-          const SizedBox(height: 12),
-          Row2(
+          const SizedBox(height: 8),
+          _Row3(
+            IntField(ctrl.curdSmpCtrl, 'SMP', 'Bags', optional: true),
+            DecimalKgField(ctrl.curdProteinCtrl, 'Protein', optional: true),
+            DecimalKgField(ctrl.curdCultureCtrl, 'Culture', optional: true),
+          ),
+          const SizedBox(height: 8),
+          _Row3(
             IntField(ctrl.curdCreamOutCtrl, 'Cream Out', 'KG'),
             SnfFatField(ctrl.curdCreamFatCtrl, 'Cream Fat'),
+            IntField(ctrl.curdOutCtrl, 'Curd Out', 'Matka'),
           ),
-          const SizedBox(height: 12),
-          _StockBadge(stock: ctrl.stockCurd, label: 'Curd in stock', unit: 'Matka'),
-          const SizedBox(height: 10),
-          IntField(ctrl.curdOutCtrl, 'Curd Out', 'Matka'),
         ];
 
       case DataEntry.madhusudanSale:
         return [
           _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           RateField(ctrl.madhusudanRateCtrl, 'Madhusudan Rate'),
         ];
 
-      case DataEntry.dahiProcessing:
-        return [
-          _StockBadge(stock: ctrl.stockSkimMilk, label: 'Skim Milk in stock'),
-          const SizedBox(height: 6),
-          // FIX 1 & 2: unit param now accepted
-          _StockBadge(stock: ctrl.stockSmp,     label: 'SMP in stock',     unit: 'Bags'),
-          const SizedBox(height: 6),
-          _StockBadge(stock: ctrl.stockProtein, label: 'Protein in stock'),
-          const SizedBox(height: 6),
-          _StockBadge(stock: ctrl.stockCulture, label: 'Culture in stock'),
-          const SizedBox(height: 10),
-          // ── Inputs ──────────────────────────────────
-          IntField(ctrl.dahiSkimMilkCtrl, 'Skim Milk Used', 'KG'),
-          const SizedBox(height: 4),
-          Text('From stock — reduces Skim Milk balance.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          const SizedBox(height: 12),
-          Row2(
-            IntField(ctrl.dahiSmpCtrl, 'SMP', 'Pkts'),
-            // FIX 3: was RateField — protein is a decimal KG amount, not a rate
-            DecimalKgField(ctrl.dahiProteinCtrl, 'Protein'),
-          ),
-          const SizedBox(height: 12),
-          // FIX 4: was RateField — culture is a decimal KG amount, not a rate
-          DecimalKgField(ctrl.dahiCultureCtrl, 'Culture'),
-          const SizedBox(height: 16),
-          // ── Containers ──────────────────────────────
-          Text('Containers',
-              style: TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
-          const SizedBox(height: 8),
-          Row2(
-            IntField(ctrl.dahiContainerCtrl, 'Container', 'pcs'),
-            // Seal is read-only — auto-mirrored from container count
-            AbsorbPointer(
-              child: IntField(ctrl.dahiSealCtrl, 'Seal (auto)', 'pcs'),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text('Seal count is automatically set equal to container count.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          const SizedBox(height: 12),
-          // ── Output ──────────────────────────────────
-          _StockBadge(stock: ctrl.stockDahi, label: 'Dahi in stock'),
-          const SizedBox(height: 10),
-          IntField(ctrl.dahiOutCtrl, 'Dahi Out', 'pcs'),
-        ];
     }
   }
 }
@@ -430,6 +402,13 @@ class _SavedEntries extends StatelessWidget {
       final entries = ctrl.savedEntries;
       if (entries.isEmpty) return const SizedBox.shrink();
 
+      // Group entries by date (most recent first)
+      final byDate = <String, List<ProdTx>>{};
+      for (final tx in entries) {
+        byDate.putIfAbsent(tx.date, () => []).add(tx);
+      }
+      final sortedDates = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
+
       return DCard(
         padding: EdgeInsets.zero,
         child: Column(
@@ -444,36 +423,59 @@ class _SavedEntries extends StatelessWidget {
               child: Row(children: [
                 const Icon(Icons.history, size: 16, color: kNavy),
                 const SizedBox(width: 8),
-                Text('${entries.length} saved entr${entries.length == 1 ? 'y' : 'ies'} today',
+                Text('${entries.length} entr${entries.length == 1 ? 'y' : 'ies'} — last 7 days',
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w700, color: kNavy)),
               ]),
             ),
-            ...List.generate(entries.length, (i) {
-              final tx = entries[i];
-              return Container(
-                decoration: BoxDecoration(
-                  border: i < entries.length - 1
-                      ? Border(bottom: BorderSide(color: Colors.grey.shade200))
-                      : null,
+            ...sortedDates.expand((date) {
+              final dayEntries = byDate[date]!;
+              return [
+                // Date header
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  color: Colors.grey.shade100,
+                  child: Text(_fmtDate(date),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                          color: Colors.grey.shade700)),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(tx.summary,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 4),
-                    Text('${tx.userName}  •  ${_fmtTime(tx.createdAt)}',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-                  ],
-                ),
-              );
+                ...List.generate(dayEntries.length, (i) {
+                  final tx = dayEntries[i];
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: i < dayEntries.length - 1
+                          ? Border(bottom: BorderSide(color: Colors.grey.shade200))
+                          : null,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(tx.summary,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 3),
+                        Text('${tx.userName}  •  ${_fmtTime(tx.createdAt)}',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                      ],
+                    ),
+                  );
+                }),
+              ];
             }),
           ],
         ),
       );
     });
+  }
+
+  String _fmtDate(String dateStr) {
+    try {
+      final dt = DateTime.parse(dateStr);
+      return DateFormat('dd MMM yyyy, EEEE').format(dt);
+    } catch (_) {
+      return dateStr;
+    }
   }
 
   String _fmtTime(String ts) {
@@ -483,6 +485,91 @@ class _SavedEntries extends StatelessWidget {
     } catch (_) {
       return ts;
     }
+  }
+}
+
+// ── 3-column and 4-column row helpers ─────────────────────────────────────
+
+class _Row3 extends StatelessWidget {
+  final Widget a, b, c;
+  const _Row3(this.a, this.b, this.c);
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    Expanded(child: a), const SizedBox(width: 8),
+    Expanded(child: b), const SizedBox(width: 8),
+    Expanded(child: c),
+  ]);
+}
+
+class _Row4 extends StatelessWidget {
+  final Widget a, b, c, d;
+  const _Row4(this.a, this.b, this.c, this.d);
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    Expanded(child: a), const SizedBox(width: 8),
+    Expanded(child: b), const SizedBox(width: 8),
+    Expanded(child: c), const SizedBox(width: 8),
+    Expanded(child: d),
+  ]);
+}
+
+// ── Compact inline stock summary (single line, wrapping) ─────────────────
+
+class _StockItem {
+  final String label;
+  final RxnInt stock;
+  final String unit;
+  const _StockItem(this.label, this.stock, this.unit);
+}
+
+class _CompactStockLine extends StatelessWidget {
+  final List<_StockItem> items;
+  final String? label;
+  const _CompactStockLine({required this.items, this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      final spans = <InlineSpan>[];
+      spans.add(TextSpan(
+        text: '${label ?? "Input Stock"}: ',
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+            color: Color(0xFF2C3E50)),
+      ));
+      bool first = true;
+      for (final item in items) {
+        final qty = item.stock.value;
+        if (qty == null) continue;
+        if (!first) {
+          spans.add(const TextSpan(
+            text: ',  ',
+            style: TextStyle(fontSize: 12, color: Color(0xFF2C3E50)),
+          ));
+        }
+        first = false;
+        final isNeg = qty < 0;
+        final color = isNeg ? kRed : kGreen;
+        spans.add(TextSpan(
+          text: '${item.label} ',
+          style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+        ));
+        spans.add(TextSpan(
+          text: '$qty ${item.unit}',
+          style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w800),
+        ));
+      }
+      if (spans.length <= 1) return const SizedBox.shrink();
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Text.rich(TextSpan(children: spans), softWrap: true),
+      );
+    });
   }
 }
 

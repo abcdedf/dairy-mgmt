@@ -15,15 +15,27 @@ class StockValuationController extends GetxController {
   final errorMessage   = ''.obs;
   final successMessage = ''.obs;
   final showRateEditor = false.obs;
+  final reportLocId    = RxnInt();
 
   final Map<int, TextEditingController> rateCtrlMap = {};
   final ratesFormKey = GlobalKey<FormState>();
+
+  int? _effectiveLocId() {
+    final appBarLoc = LocationService.instance.selected.value;
+    if (appBarLoc != null && appBarLoc.code.toLowerCase() == 'test') {
+      return appBarLoc.id;
+    }
+    return reportLocId.value;
+  }
 
   @override
   void onInit() {
     super.onInit();
     _loadInitial();
-    ever(LocationService.instance.selected, (_) => fetchValuation());
+    ever(LocationService.instance.selected, (_) {
+      reportLocId.value = null;
+      fetchValuation();
+    });
   }
 
   @override
@@ -47,8 +59,14 @@ class StockValuationController extends GetxController {
   }
 
   Future<void> fetchValuation() async {
-    final locId = LocationService.instance.locId;
-    if (locId == null) return;
+    final locId = _effectiveLocId();
+    if (locId == null) {
+      // Stock valuation requires a specific location
+      stockDays.clear();
+      products.clear();
+      errorMessage.value = 'Select a location to view stock valuation.';
+      return;
+    }
     isLoading.value    = true;
     errorMessage.value = '';
     final res = await ApiClient.get('/stock-valuation?location_id=$locId');

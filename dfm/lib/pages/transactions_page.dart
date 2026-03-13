@@ -61,32 +61,38 @@ class _SalesTransactionsPageState extends State<SalesTransactionsPage> {
           ),
         ],
       ),
-      body: SelectionArea(child: Obx(() {
-        if (ctrl.isLoading.value) return const LoadingCenter();
-        if (ctrl.errorMessage.value.isNotEmpty) {
-          return EmptyState(
-            icon: Icons.error_outline,
-            message: ctrl.errorMessage.value,
-            buttonLabel: 'Retry',
-            onButton: ctrl.fetchReport,
-          );
-        }
-        if (ctrl.rows.isEmpty) {
-          return const EmptyState(
-            icon: Icons.receipt_long_outlined,
-            message: 'No sales transactions found.',
-          );
-        }
+      body: SelectionArea(child: Column(children: [
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchReport(),
+        ),
+        Expanded(child: Obx(() {
+          if (ctrl.isLoading.value) return const LoadingCenter();
+          if (ctrl.errorMessage.value.isNotEmpty) {
+            return EmptyState(
+              icon: Icons.error_outline,
+              message: ctrl.errorMessage.value,
+              buttonLabel: 'Retry',
+              onButton: ctrl.fetchReport,
+            );
+          }
+          if (ctrl.rows.isEmpty) {
+            return const EmptyState(
+              icon: Icons.receipt_long_outlined,
+              message: 'No sales transactions found.',
+            );
+          }
 
-        return LayoutBuilder(builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= _kWrapBreakpoint;
+          return LayoutBuilder(builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= _kWrapBreakpoint;
 
-          // Column definitions: label, flex, builder
-          Widget headerRow() => Container(
+            // Column definitions: label, flex, builder
+            Widget headerRow() => Container(
             color: kNavy,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(children: const [
               SizedBox(width: 70, child: Text('Date', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
+              Expanded(flex: 2, child: Text('Location', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
               Expanded(flex: 3, child: Text('Product', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
               Expanded(flex: 3, child: Text('Customer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
               SizedBox(width: 60, child: Text('Qty', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
@@ -106,6 +112,7 @@ class _SalesTransactionsPageState extends State<SalesTransactionsPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: Row(children: [
                   SizedBox(width: 70, child: Text(dateStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                  Expanded(flex: 2, child: Text(tx.locationName, style: const TextStyle(fontSize: 12))),
                   Expanded(flex: 3, child: Text(tx.productName, style: const TextStyle(fontSize: 12))),
                   Expanded(flex: 3, child: Text(tx.customerName, style: const TextStyle(fontSize: 12))),
                   SizedBox(width: 60, child: Text('${tx.quantityKg}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
@@ -125,6 +132,7 @@ class _SalesTransactionsPageState extends State<SalesTransactionsPage> {
                 runSpacing: 4,
                 children: [
                   _Tag(dateStr, bold: true),
+                  if (tx.locationName.isNotEmpty) _Tag(tx.locationName, dim: true),
                   _Tag(tx.productName, bold: true),
                   _Tag(tx.customerName),
                   _Tag('${tx.quantityKg} KG'),
@@ -146,6 +154,7 @@ class _SalesTransactionsPageState extends State<SalesTransactionsPage> {
           ]);
         });
       })),
+      ])),
     );
   }
 }
@@ -199,86 +208,95 @@ class _ProductionTransactionsPageState
           ),
         ],
       ),
-      body: SelectionArea(child: Obx(() {
-        if (ctrl.isLoading.value) return const LoadingCenter();
-        if (ctrl.errorMessage.value.isNotEmpty) {
-          return EmptyState(
-            icon: Icons.error_outline,
-            message: ctrl.errorMessage.value,
-            buttonLabel: 'Retry',
-            onButton: ctrl.fetchReport,
-          );
-        }
-        if (ctrl.rows.isEmpty) {
-          return const EmptyState(
-            icon: Icons.factory_outlined,
-            message: 'No production transactions found.',
-          );
-        }
-
-        return LayoutBuilder(builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= _kWrapBreakpoint;
-
-          Widget headerRow() => Container(
-            color: kNavy,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(children: const [
-              SizedBox(width: 70, child: Text('Date', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
-              Expanded(flex: 2, child: Text('Type', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
-              Expanded(flex: 5, child: Text('Details', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
-              SizedBox(width: 60, child: Text('User', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
-            ]),
-          );
-
-          Widget dataRow(ProdTx tx, bool even) {
-            final parsed = DateTime.tryParse(tx.date);
-            final dateStr = parsed != null ? dateFmt.format(parsed) : tx.date;
-            final details = _prodDetailTags(tx);
-
-            if (isWide) {
-              return Container(
-                color: even ? Colors.white : const Color(0xFFF8F9FA),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  SizedBox(width: 70, child: Text(dateStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-                  Expanded(flex: 2, child: _TypeBadge(tx.type)),
-                  Expanded(flex: 5, child: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: details,
-                  )),
-                  SizedBox(width: 60, child: Text(tx.userName, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: Colors.grey.shade500))),
-                ]),
-              );
-            }
-
-            // Mobile: wrap layout
-            return Container(
-              color: even ? Colors.white : const Color(0xFFF8F9FA),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  _Tag(dateStr, bold: true),
-                  _TypeBadge(tx.type),
-                  ...details,
-                  _Tag(tx.userName, dim: true),
-                ],
-              ),
+      body: SelectionArea(child: Column(children: [
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchReport(),
+        ),
+        Expanded(child: Obx(() {
+          if (ctrl.isLoading.value) return const LoadingCenter();
+          if (ctrl.errorMessage.value.isNotEmpty) {
+            return EmptyState(
+              icon: Icons.error_outline,
+              message: ctrl.errorMessage.value,
+              buttonLabel: 'Retry',
+              onButton: ctrl.fetchReport,
+            );
+          }
+          if (ctrl.rows.isEmpty) {
+            return const EmptyState(
+              icon: Icons.factory_outlined,
+              message: 'No production transactions found.',
             );
           }
 
-          return Column(children: [
-            if (isWide) headerRow(),
-            Expanded(child: ListView.separated(
-              itemCount: ctrl.rows.length,
-              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
-              itemBuilder: (_, i) => dataRow(ctrl.rows[i], i.isEven),
-            )),
-          ]);
-        });
-      })),
+          return LayoutBuilder(builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= _kWrapBreakpoint;
+
+            Widget headerRow() => Container(
+              color: kNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(children: const [
+                SizedBox(width: 70, child: Text('Date', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
+                Expanded(flex: 2, child: Text('Location', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
+                Expanded(flex: 2, child: Text('Type', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
+                Expanded(flex: 5, child: Text('Details', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
+                SizedBox(width: 60, child: Text('User', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12))),
+              ]),
+            );
+
+            Widget dataRow(ProdTx tx, bool even) {
+              final parsed = DateTime.tryParse(tx.date);
+              final dateStr = parsed != null ? dateFmt.format(parsed) : tx.date;
+              final details = _prodDetailTags(tx);
+
+              if (isWide) {
+                return Container(
+                  color: even ? Colors.white : const Color(0xFFF8F9FA),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    SizedBox(width: 70, child: Text(dateStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                    Expanded(flex: 2, child: Text(tx.locationName, style: const TextStyle(fontSize: 12))),
+                    Expanded(flex: 2, child: _TypeBadge(tx.type)),
+                    Expanded(flex: 5, child: Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: details,
+                    )),
+                    SizedBox(width: 60, child: Text(tx.userName, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: Colors.grey.shade500))),
+                  ]),
+                );
+              }
+
+              // Mobile: wrap layout
+              return Container(
+                color: even ? Colors.white : const Color(0xFFF8F9FA),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    _Tag(dateStr, bold: true),
+                    if (tx.locationName.isNotEmpty) _Tag(tx.locationName, dim: true),
+                    _TypeBadge(tx.type),
+                    ...details,
+                    _Tag(tx.userName, dim: true),
+                  ],
+                ),
+              );
+            }
+
+            return Column(children: [
+              if (isWide) headerRow(),
+              Expanded(child: ListView.separated(
+                itemCount: ctrl.rows.length,
+                separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
+                itemBuilder: (_, i) => dataRow(ctrl.rows[i], i.isEven),
+              )),
+            ]);
+          });
+        })),
+      ])),
     );
   }
 }

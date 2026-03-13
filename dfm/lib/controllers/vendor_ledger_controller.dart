@@ -5,69 +5,30 @@ import 'package:intl/intl.dart';
 import '../core/api_client.dart';
 import '../core/location_service.dart';
 
-class VendorSummary {
-  final int    vendorId;
+class VendorLedgerRow {
+  final String date;
+  final String locationName;
   final String vendorName;
-  final double totalPurchases;
-  final double totalPayments;
-  final double balanceDue;
+  final double purchases;
+  final double payments;
+  final double balance;
 
-  const VendorSummary({
-    required this.vendorId,
-    required this.vendorName,
-    required this.totalPurchases,
-    required this.totalPayments,
-    required this.balanceDue,
-  });
-
-  factory VendorSummary.fromJson(Map<String, dynamic> j) => VendorSummary(
-    vendorId:       int.parse(j['vendor_id'].toString()),
-    vendorName:     j['vendor_name'] ?? '',
-    totalPurchases: double.parse(j['total_purchases'].toString()),
-    totalPayments:  double.parse(j['total_payments'].toString()),
-    balanceDue:     double.parse(j['balance_due'].toString()),
-  );
-}
-
-class LedgerTransaction {
-  final String  type;         // 'purchase' or 'payment'
-  final String  date;
-  final String? vendorName;
-  final String? product;
-  final double? quantity;
-  final double? rate;
-  final double  amount;
-  final String? method;
-  final String? note;
-  final String? locationName;
-  final String? userName;
-
-  const LedgerTransaction({
-    required this.type,
+  const VendorLedgerRow({
     required this.date,
-    this.vendorName,
-    this.product,
-    this.quantity,
-    this.rate,
-    required this.amount,
-    this.method,
-    this.note,
-    this.locationName,
-    this.userName,
+    required this.locationName,
+    required this.vendorName,
+    required this.purchases,
+    required this.payments,
+    required this.balance,
   });
 
-  factory LedgerTransaction.fromJson(Map<String, dynamic> j) => LedgerTransaction(
-    type:         j['type'] ?? '',
-    date:         j['date'] ?? '',
-    vendorName:   j['vendor_name'],
-    product:      j['product'],
-    quantity:     j['quantity'] != null ? double.parse(j['quantity'].toString()) : null,
-    rate:         j['rate'] != null ? double.parse(j['rate'].toString()) : null,
-    amount:       double.parse(j['amount'].toString()),
-    method:       j['method'],
-    note:         j['note'],
-    locationName: j['location_name'],
-    userName:     j['user_name'],
+  factory VendorLedgerRow.fromJson(Map<String, dynamic> j) => VendorLedgerRow(
+    date:         j['date']?.toString() ?? '',
+    locationName: j['location_name']?.toString() ?? '',
+    vendorName:   j['vendor_name']?.toString() ?? '',
+    purchases:    double.tryParse(j['purchases']?.toString() ?? '') ?? 0,
+    payments:     double.tryParse(j['payments']?.toString() ?? '') ?? 0,
+    balance:      double.tryParse(j['balance']?.toString() ?? '') ?? 0,
   );
 }
 
@@ -83,68 +44,54 @@ class VendorDropdownItem {
 
 class VendorLedgerController extends GetxController {
   final isLoading        = false.obs;
-  final isLoadingDetail  = false.obs;
   final isSaving         = false.obs;
   final errorMessage     = ''.obs;
-  final vendors          = <VendorSummary>[].obs;
-  final transactions     = <LedgerTransaction>[].obs;
-  final detailVendorName = ''.obs;
-  final detailPurchases  = 0.0.obs;
-  final detailPayments   = 0.0.obs;
-  final detailBalance    = 0.0.obs;
-
-  // Vendor dropdown for detail view
+  final rows             = <VendorLedgerRow>[].obs;
   final vendorList       = <VendorDropdownItem>[].obs;
   final selectedVendorId = 0.obs;  // 0 = All
+  final reportLocId      = RxnInt();
 
   final _fmt = DateFormat('yyyy-MM-dd');
+
+  int? _effectiveLocId() {
+    final appBarLoc = LocationService.instance.selected.value;
+    if (appBarLoc != null && appBarLoc.code.toLowerCase() == 'test') {
+      return appBarLoc.id;
+    }
+    return reportLocId.value;
+  }
 
   @override
   void onInit() {
     super.onInit();
     fetchLedger();
+    ever(LocationService.instance.selected, (_) {
+      reportLocId.value = null;
+      fetchLedger();
+    });
   }
 
   Future<void> fetchLedger() async {
     isLoading.value    = true;
     errorMessage.value = '';
-    final locId = LocationService.instance.locId;
-    final locParam = locId != null ? '?location_id=$locId' : '';
-    final res = await ApiClient.get('/vendor-ledger$locParam');
+    final locId = _effectiveLocId();
+    final params = <String>[];
+    if (locId != null) params.add('location_id=$locId');
+    if (selectedVendorId.value > 0) params.add('vendor_id=${selectedVendorId.value}');
+    final query = params.isNotEmpty ? '?${params.join('&')}' : '';
+    final res = await ApiClient.get('/vendor-ledger$query');
     isLoading.value = false;
     if (res.ok) {
-      vendors.value = (res.data['vendors'] as List)
-          .map((e) => VendorSummary.fromJson(e as Map<String, dynamic>))
+      rows.value = (res.data['rows'] as List)
+          .map((e) => VendorLedgerRow.fromJson(e as Map<String, dynamic>))
           .toList();
-    } else {
-      errorMessage.value = res.message ?? 'Failed to load vendor ledger.';
-    }
-  }
-
-  Future<void> fetchDetail(int vendorId) async {
-    isLoadingDetail.value = true;
-    errorMessage.value    = '';
-    selectedVendorId.value = vendorId;
-    final locId = LocationService.instance.locId;
-    final locParam = locId != null ? '&location_id=$locId' : '';
-    final res = await ApiClient.get('/vendor-ledger-detail?vendor_id=$vendorId$locParam');
-    isLoadingDetail.value = false;
-    if (res.ok) {
-      detailVendorName.value = res.data['vendor_name'] ?? '';
-      detailPurchases.value  = double.parse(res.data['total_purchases'].toString());
-      detailPayments.value   = double.parse(res.data['total_payments'].toString());
-      detailBalance.value    = double.parse(res.data['balance_due'].toString());
-      transactions.value     = (res.data['transactions'] as List)
-          .map((e) => LedgerTransaction.fromJson(e as Map<String, dynamic>))
-          .toList();
-      // Populate vendor dropdown list
       if (res.data['vendors'] != null) {
         vendorList.value = (res.data['vendors'] as List)
             .map((e) => VendorDropdownItem.fromJson(e as Map<String, dynamic>))
             .toList();
       }
     } else {
-      errorMessage.value = res.message ?? 'Failed to load vendor details.';
+      errorMessage.value = res.message ?? 'Failed to load vendor ledger.';
     }
   }
 

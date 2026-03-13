@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../core/connectivity_service.dart';
+import '../core/location_service.dart';
+import '../core/permission_service.dart';
+import '../models/models.dart';
 
 // ── Colours ───────────────────────────────────────────────────
 const kNavy  = Color(0xFF1B4F72);
@@ -414,4 +417,73 @@ class _SyncedHorizontalBodyState extends State<SyncedHorizontalBody> {
       ),
     );
   }
+}
+
+// ── Report Location Dropdown ─────────────────────────────────
+// Shared dropdown for reports. Shows "All" + user's non-Test locations.
+// When app bar is set to Test, hides dropdown and returns Test location ID.
+//
+// Usage:
+//   final reportLocId = RxnInt();  // null = All
+//   ReportLocationDropdown(selected: reportLocId, onChanged: (v) { ... })
+
+bool get _isTestSelected {
+  final loc = LocationService.instance.selected.value;
+  return loc != null && loc.code.toLowerCase() == 'test';
+}
+
+List<DairyLocation> get _reportLocations =>
+    PermissionService.instance.locations
+        .where((l) => l.code.toLowerCase() != 'test')
+        .toList();
+
+class ReportLocationDropdown extends StatelessWidget {
+  final RxnInt selected; // null = All
+  final void Function(int?) onChanged;
+  const ReportLocationDropdown({
+    super.key,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // When Test is selected in app bar, don't show dropdown
+    return Obx(() {
+      if (_isTestSelected) return const SizedBox.shrink();
+      final locs = _reportLocations;
+      if (locs.isEmpty) return const SizedBox.shrink();
+      return Container(
+        width: double.infinity,
+        color: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: DropdownButtonFormField<int>(
+          initialValue: selected.value ?? -1, // -1 = All
+          decoration: const InputDecoration(
+            labelText: 'Location',
+            border: OutlineInputBorder(),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          items: [
+            const DropdownMenuItem(value: -1, child: Text('All Locations')),
+            ...locs.map((l) =>
+                DropdownMenuItem(value: l.id, child: Text(l.name))),
+          ],
+          onChanged: (v) {
+            selected.value = (v == null || v == -1) ? null : v;
+            onChanged(selected.value);
+          },
+        ),
+      );
+    });
+  }
+}
+
+/// Returns the effective location_id for a report API call.
+/// When Test is selected in app bar, returns Test's ID.
+/// Otherwise returns the dropdown selection (null = All).
+int? reportLocationId(RxnInt dropdownSelection) {
+  if (_isTestSelected) return LocationService.instance.locId;
+  return dropdownSelection.value;
 }

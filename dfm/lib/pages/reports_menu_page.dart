@@ -1,164 +1,156 @@
 // lib/pages/reports_menu_page.dart
 
 import 'package:flutter/material.dart';
+import '../core/api_client.dart';
+import '../core/permission_service.dart';
 import 'sales_report_page.dart';
 import 'vendor_purchase_report_page.dart';
 import 'vendor_ledger_page.dart';
-import 'funds_report_page.dart';
 import 'cashflow_report_page.dart';
+import 'profitability_report_page.dart';
 import 'transactions_page.dart';
 import 'stock_page.dart';
 import 'stock_valuation_page.dart';
-import 'pouch_type_page.dart';
 import 'pouch_stock_page.dart';
-import 'pouch_pnl_page.dart';
-import 'madhusudan_pnl_page.dart';
-import '../core/permission_service.dart';
+import 'cash_stock_report_page.dart';
+import 'shared_widgets.dart';
 
-class ReportsMenuPage extends StatelessWidget {
+/// Static registry: key → (icon, color, page builder).
+/// Only these need a code change when adding a brand-new report page.
+final Map<String, _ReportDef> _registry = {
+  'daily_product_sales':    _ReportDef(Icons.table_chart_outlined,           const Color(0xFF1A73E8), () => const DailySalesReportPage()),
+  'daily_customer_sales':   _ReportDef(Icons.receipt_outlined,               const Color(0xFF6A1B9A), () => const SalesLedgerPage()),
+  'sales_transactions':     _ReportDef(Icons.receipt_outlined,               const Color(0xFF6A1B9A), () => const SalesTransactionsPage()),
+  'production_transactions':_ReportDef(Icons.precision_manufacturing_outlined,const Color(0xFFE65100), () => const ProductionTransactionsPage()),
+  'vendor_purchase_report': _ReportDef(Icons.local_shipping_outlined,        const Color(0xFF2E7D32), () => const VendorPurchaseReportPage()),
+  'stock':                  _ReportDef(Icons.inventory_2_outlined,           const Color(0xFF455A64), () => const StockPage()),
+  'vendor_ledger':          _ReportDef(Icons.account_balance_wallet_outlined,const Color(0xFF00897B), () => const VendorLedgerPage()),
+  'cashflow_report':        _ReportDef(Icons.account_balance_outlined,       const Color(0xFF0D47A1), () => const CashflowReportPage()),
+  'profitability_report':   _ReportDef(Icons.trending_up_outlined,           const Color(0xFF1B5E20), () => const ProfitabilityReportPage()),
+  'stock_valuation':        _ReportDef(Icons.bar_chart_outlined,             const Color(0xFF6A1B9A), () => const StockValuationPage()),
+  'pouch_stock':            _ReportDef(Icons.local_drink_outlined,           const Color(0xFF00838F), () => const PouchStockPage()),
+  'cash_stock_report':      _ReportDef(Icons.account_balance_outlined,       const Color(0xFF4A148C), () => const CashStockReportPage()),
+};
+
+class _ReportDef {
+  final IconData icon;
+  final Color color;
+  final Widget Function() builder;
+  const _ReportDef(this.icon, this.color, this.builder);
+}
+
+class ReportsMenuPage extends StatefulWidget {
   const ReportsMenuPage({super.key});
+  @override
+  State<ReportsMenuPage> createState() => _ReportsMenuPageState();
+}
 
-  static bool _can(String page) => PermissionService.instance.canSeePage(page);
+class _ReportsMenuPageState extends State<ReportsMenuPage> {
+  List<_ReportItem>? _items;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMenu();
+  }
+
+  Future<void> _fetchMenu() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final res = await ApiClient.get('/report-menu');
+      if (!res.ok) {
+        setState(() { _loading = false; _error = res.message ?? 'Failed to load menu.'; });
+        return;
+      }
+      final canFinance = PermissionService.instance.canFinance;
+      final items = <_ReportItem>[];
+      for (final r in (res.data as List)) {
+        final m = r as Map<String, dynamic>;
+        final key = m['key']?.toString() ?? '';
+        final perm = m['permission']?.toString() ?? 'all';
+        // Permission check: 'finance' requires canFinance
+        if (perm == 'finance' && !canFinance) continue;
+        final def = _registry[key];
+        if (def == null) continue; // unknown key — skip
+        items.add(_ReportItem(
+          key: key,
+          label: m['label']?.toString() ?? key,
+          subtitle: m['subtitle']?.toString() ?? '',
+          icon: def.icon,
+          color: def.color,
+          builder: def.builder,
+        ));
+      }
+      setState(() { _items = items; _loading = false; });
+    } catch (e) {
+      setState(() { _loading = false; _error = 'Unexpected error loading menu.'; });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
+    if (_loading) return const LoadingCenter();
+    if (_error != null) {
+      return EmptyState(
+        icon: Icons.error_outline,
+        message: _error!,
+        buttonLabel: 'Retry',
+        onButton: _fetchMenu,
+      );
+    }
+    final items = _items ?? [];
+    if (items.isEmpty) {
+      return const EmptyState(
+        icon: Icons.list_alt_outlined,
+        message: 'No reports available.',
+      );
+    }
+    return LayoutBuilder(builder: (context, constraints) {
+      final cols = constraints.maxWidth >= 900 ? 3
+                 : constraints.maxWidth >= 560 ? 2
+                 : 1;
+      return GridView.builder(
         padding: const EdgeInsets.all(16),
-        children: [
-          _ReportCard(
-            icon: Icons.table_chart_outlined,
-            color: const Color(0xFF1A73E8),
-            title: 'Daily Product Sales Report',
-            subtitle: 'Product-wise sales aggregated by date — last 30 days',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const DailySalesReportPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.receipt_outlined,
-            color: const Color(0xFF6A1B9A),
-            title: 'Daily Customer Sales Report',
-            subtitle: 'All sales by customer with product, qty, rate and total — last 30 days',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const SalesLedgerPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.receipt_outlined,
-            color: const Color(0xFF6A1B9A),
-            title: 'Sales Transactions',
-            subtitle: 'Every sale entry with customer, qty, rate and user — last 7 days',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const SalesTransactionsPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.precision_manufacturing_outlined,
-            color: const Color(0xFFE65100),
-            title: 'Production Transactions',
-            subtitle: 'All production entries with quantities and user — last 7 days',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const ProductionTransactionsPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.local_shipping_outlined,
-            color: const Color(0xFF2E7D32),
-            title: 'Vendor Purchase Report',
-            subtitle: 'All purchases by vendor with product, qty, rate and amount',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const VendorPurchaseReportPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.inventory_2_outlined,
-            color: const Color(0xFF455A64),
-            title: 'Stock',
-            subtitle: '30-day running stock balance across all products',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const StockPage())),
-          ),
-          if (_can('vendor_ledger')) ...[
-            const SizedBox(height: 12),
-            _ReportCard(
-              icon: Icons.account_balance_wallet_outlined,
-              color: const Color(0xFF00897B),
-              title: 'Vendor Ledger',
-              subtitle: 'Payment tracking — purchases, payments and balance due per vendor',
-              onTap: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => const VendorLedgerPage())),
-            ),
-          ],
-          if (_can('funds_report')) ...[
-            const SizedBox(height: 12),
-            _ReportCard(
-              icon: Icons.account_balance_outlined,
-              color: const Color(0xFF0D47A1),
-              title: 'Cash Flow Report',
-              subtitle: 'Daily cash position — sales, purchases, payments and running balance',
-              onTap: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => const CashflowReportPage())),
-            ),
-            const SizedBox(height: 12),
-            _ReportCard(
-              icon: Icons.account_balance_outlined,
-              color: const Color(0xFF0D47A1),
-              title: 'Funds Report',
-              subtitle: 'Sales revenue, stock value, vendor dues and free cash',
-              onTap: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => const FundsReportPage())),
-            ),
-          ],
-          if (_can('stock_valuation')) ...[
-            const SizedBox(height: 12),
-            _ReportCard(
-              icon: Icons.bar_chart_outlined,
-              color: const Color(0xFF6A1B9A),
-              title: 'Stock Valuation',
-              subtitle: 'Stock quantities with estimated values per product',
-              onTap: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => const StockValuationPage())),
-            ),
-          ],
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.sell_outlined,
-            color: const Color(0xFFD84315),
-            title: 'Madhusudan P&L',
-            subtitle: 'FF Milk direct sale — revenue, cost and profit per transaction',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const MadhusudanPnlPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.local_drink_outlined,
-            color: const Color(0xFF00695C),
-            title: 'Pouch P&L',
-            subtitle: 'Pouch production — revenue, cost and profit per batch',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const PouchPnlPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.local_drink_outlined,
-            color: const Color(0xFF00838F),
-            title: 'Pouch Stock',
-            subtitle: 'Per-type pouch production balance',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const PouchStockPage())),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.settings_outlined,
-            color: const Color(0xFF795548),
-            title: 'Pouch Types',
-            subtitle: 'Manage pouch types — name, litre, price',
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const PouchTypePage())),
-          ),
-        ],
-    );
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: cols == 1 ? 4.0 : 2.8,
+        ),
+        itemCount: items.length,
+        itemBuilder: (context, i) {
+          final item = items[i];
+          return _ReportCard(
+            icon: item.icon,
+            color: item.color,
+            title: item.label,
+            subtitle: item.subtitle,
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => item.builder())),
+          );
+        },
+      );
+    });
   }
+}
+
+class _ReportItem {
+  final String key;
+  final String label;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  final Widget Function() builder;
+  const _ReportItem({
+    required this.key,
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.builder,
+  });
 }
 
 class _ReportCard extends StatelessWidget {
@@ -185,28 +177,30 @@ class _ReportCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           child: Row(children: [
             Container(
-              width: 48, height: 48,
+              width: 44, height: 44,
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: color, size: 26),
+              child: Icon(icon, color: color, size: 24),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(title, style: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 15)),
-                const SizedBox(height: 4),
+                    fontWeight: FontWeight.w700, fontSize: 14),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 3),
                 Text(subtitle, style: TextStyle(
-                    fontSize: 12, color: Colors.grey.shade600)),
+                    fontSize: 11, color: Colors.grey.shade600),
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
               ],
             )),
-            Icon(Icons.chevron_right, color: Colors.grey.shade400),
           ]),
         ),
       ),

@@ -10,7 +10,8 @@
       "Bash(chmod +x:*)",
       "Bash(flutter run:*)",
       "Bash(pkill:*)",
-      "Bash(dart analyze:*)"
+      "Bash(dart analyze:*)",
+      "WebSearch"
     ]
   }
 }

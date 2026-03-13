@@ -101,8 +101,8 @@ class _PageDef {
 const List<_PageDef> _allPages = [
   _PageDef(
     key:        'production',
-    page:       MobileFormFactor(child: ProductionPage()),
-    label:      'Production',
+    page:       ProductionPage(),
+    label:      'Activity',
     icon:       Icons.factory_outlined,
     activeIcon: Icons.factory,
   ),
@@ -115,7 +115,7 @@ const List<_PageDef> _allPages = [
   ),
   _PageDef(
     key:        'reports',
-    page:       MobileFormFactor(child: ReportsMenuPage()),
+    page:       ReportsMenuPage(),
     label:      'Reports',
     icon:       Icons.assessment_outlined,
     activeIcon: Icons.assessment,

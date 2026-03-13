@@ -18,10 +18,12 @@ class SalesReportCell {
 
 class SalesReportRow {
   final String date;
+  final String? locationName;
   final Map<int, SalesReportCell?> products;
   final double rowTotal;
   const SalesReportRow({
     required this.date,
+    this.locationName,
     required this.products,
     required this.rowTotal,
   });
@@ -34,6 +36,7 @@ class SalesReportController extends GetxController {
   final prodNames         = <int, String>{}.obs;
   final rows              = <SalesReportRow>[].obs;
   final selectedProductId = 0.obs;  // 0 = All
+  final reportLocId       = RxnInt();
 
   /// Columns to display — filtered by selectedProductId
   List<int> get visibleCols =>
@@ -41,19 +44,30 @@ class SalesReportController extends GetxController {
           ? colOrder
           : colOrder.where((pid) => pid == selectedProductId.value).toList();
 
+  int? _effectiveLocId() {
+    final appBarLoc = LocationService.instance.selected.value;
+    if (appBarLoc != null && appBarLoc.code.toLowerCase() == 'test') {
+      return appBarLoc.id;
+    }
+    return reportLocId.value;
+  }
+
   @override
   void onInit() {
     super.onInit();
     fetchReport();
-    ever(LocationService.instance.selected, (_) => fetchReport());
+    ever(LocationService.instance.selected, (_) {
+      reportLocId.value = null;
+      fetchReport();
+    });
   }
 
   Future<void> fetchReport() async {
-    final locId = LocationService.instance.locId;
-    if (locId == null) return;
     isLoading.value    = true;
     errorMessage.value = '';
-    final res = await ApiClient.get('/sales-report?location_id=$locId');
+    final locId = _effectiveLocId();
+    final locParam = locId != null ? '?location_id=$locId' : '';
+    final res = await ApiClient.get('/sales-report$locParam');
     isLoading.value = false;
     if (!res.ok) { errorMessage.value = res.message ?? 'Error fetching report.'; return; }
 
@@ -75,9 +89,10 @@ class SalesReportController extends GetxController {
             : SalesReportCell.fromJson(v as Map<String, dynamic>);
       });
       return SalesReportRow(
-        date:     rm['date'],
-        products: prods,
-        rowTotal: double.tryParse(rm['row_total'].toString()) ?? 0,
+        date:         rm['date'],
+        locationName: rm['location_name']?.toString(),
+        products:     prods,
+        rowTotal:     double.tryParse(rm['row_total'].toString()) ?? 0,
       );
     }).toList();
   }
@@ -94,6 +109,7 @@ class SalesLedgerRow {
   final double quantity;
   final double rate;
   final double total;
+  final String locationName;
 
   const SalesLedgerRow({
     required this.id,
@@ -104,6 +120,7 @@ class SalesLedgerRow {
     required this.quantity,
     required this.rate,
     required this.total,
+    required this.locationName,
   });
 
   factory SalesLedgerRow.fromJson(Map<String, dynamic> j) {
@@ -117,6 +134,7 @@ class SalesLedgerRow {
       quantity:     d('quantity_kg'),
       rate:         d('rate'),
       total:        d('total'),
+      locationName: j['location_name']?.toString() ?? '',
     );
   }
 }
@@ -137,24 +155,36 @@ class SalesLedgerController extends GetxController {
   final rows               = <SalesLedgerRow>[].obs;
   final customers          = <SalesLedgerCustomer>[].obs;
   final selectedCustomerId = 0.obs;  // 0 = All
+  final reportLocId        = RxnInt();
+
+  int? _effectiveLocId() {
+    final appBarLoc = LocationService.instance.selected.value;
+    if (appBarLoc != null && appBarLoc.code.toLowerCase() == 'test') {
+      return appBarLoc.id;
+    }
+    return reportLocId.value;
+  }
 
   @override
   void onInit() {
     super.onInit();
     fetchReport();
-    ever(LocationService.instance.selected, (_) => fetchReport());
+    ever(LocationService.instance.selected, (_) {
+      reportLocId.value = null;
+      fetchReport();
+    });
   }
 
   Future<void> fetchReport() async {
-    final locId = LocationService.instance.locId;
-    if (locId == null) return;
     isLoading.value    = true;
     errorMessage.value = '';
     try {
-      final custParam = selectedCustomerId.value > 0
-          ? '&customer_id=${selectedCustomerId.value}' : '';
-      final res = await ApiClient.get(
-          '/sales-ledger?location_id=$locId$custParam');
+      final locId = _effectiveLocId();
+      final params = <String>[];
+      if (locId != null) params.add('location_id=$locId');
+      if (selectedCustomerId.value > 0) params.add('customer_id=${selectedCustomerId.value}');
+      final query = params.isNotEmpty ? '?${params.join('&')}' : '';
+      final res = await ApiClient.get('/sales-ledger$query');
       isLoading.value = false;
       if (!res.ok) {
         errorMessage.value = res.message ?? 'Error loading sales ledger.';

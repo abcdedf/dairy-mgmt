@@ -43,6 +43,13 @@ class Dairy_Production_API {
         'wp_mf_3_dp_production_flows'      => 'Production Flows',
     ];
 
+    // Flow type constants — must match production_flows.key in the DB.
+    // Used in milk_usage.flow_type and all queries that reference flows.
+    const FLOW_FF_MILK    = 'ff_milk_processing';
+    const FLOW_POUCH      = 'pouch_production';
+    const FLOW_MADHUSUDAN = 'madhusudan_sale';
+    const FLOW_CURD       = 'curd_production';
+
     // Pages every logged-in user with at least one location can see
     const PAGES_BASE = ['production', 'sales', 'reports'];
 
@@ -60,6 +67,12 @@ class Dairy_Production_API {
                    [ $this, 'handle_save_permissions' ]);
         add_action('admin_post_dairy_save_vendor_locations',
                    [ $this, 'handle_save_vendor_locations' ]);
+
+        // WP-Cron: scheduled report emails
+        add_action('dairy_send_scheduled_reports', [ $this, 'process_scheduled_reports' ]);
+        if ( ! wp_next_scheduled('dairy_send_scheduled_reports') ) {
+            wp_schedule_event( time(), 'hourly', 'dairy_send_scheduled_reports' );
+        }
     }
 
     // ════════════════════════════════════════════════════
@@ -123,7 +136,7 @@ class Dairy_Production_API {
                 "SELECT id, name, code FROM wp_mf_3_dp_locations
                   WHERE id IN (" . implode(',', array_fill(0, count($locations), '%d')) . ")
                     AND is_active = 1
-                  ORDER BY name",
+                  ORDER BY sort_order, name",
                 ...$locations
             ), ARRAY_A
         );
@@ -377,7 +390,7 @@ class Dairy_Production_API {
         $db->query("
             CREATE TABLE IF NOT EXISTS wp_mf_3_dp_milk_usage (
                 id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                flow_type    VARCHAR(30) NOT NULL COMMENT 'milk_cream, pouch',
+                flow_type    VARCHAR(30) NOT NULL COMMENT 'References production_flows.key',
                 flow_id      INT UNSIGNED NOT NULL,
                 location_id  INT UNSIGNED NOT NULL,
                 entry_date   DATE NOT NULL,
@@ -391,6 +404,23 @@ class Dairy_Production_API {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $this->check_db('ensure_dahi_product.milk_usage_table');
+
+        // Migrate: align flow_type values with production_flows.key
+        $old_ft = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_milk_usage WHERE flow_type = 'milk_cream'");
+        if ($old_ft > 0) {
+            $renames = [
+                'milk_cream'  => 'ff_milk_processing',
+                'pouch'       => 'pouch_production',
+                'madhusudan'  => 'madhusudan_sale',
+                'curd'        => 'curd_production',
+            ];
+            foreach ($renames as $old => $new) {
+                $db->query($db->prepare(
+                    "UPDATE wp_mf_3_dp_milk_usage SET flow_type = %s WHERE flow_type = %s",
+                    $new, $old));
+            }
+            $this->check_db('ensure_dahi_product.milk_usage_flow_type_migrate');
+        }
 
         // ── Pouch Types table ──
         $db->query("
@@ -558,6 +588,83 @@ class Dairy_Production_API {
             $this->check_db('ensure_dahi_product.production_flows_seed');
         }
 
+        // ── Report Menu table ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_report_menu (
+                `key`       VARCHAR(50) NOT NULL PRIMARY KEY,
+                label       VARCHAR(100) NOT NULL,
+                subtitle    VARCHAR(255) NOT NULL DEFAULT '',
+                sort_order  INT NOT NULL DEFAULT 0,
+                is_active   TINYINT(1) NOT NULL DEFAULT 1,
+                permission  VARCHAR(20) NOT NULL DEFAULT 'all'
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.report_menu_table');
+
+        $rm_count = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_report_menu");
+        if ($rm_count === 0) {
+            $reports = [
+                ['key'=>'daily_product_sales',   'label'=>'Daily Product Sales Report',  'subtitle'=>'Product-wise sales aggregated by date — last 30 days',                     'sort_order'=>10, 'permission'=>'all'],
+                ['key'=>'daily_customer_sales',  'label'=>'Daily Customer Sales Report', 'subtitle'=>'All sales by customer with product, qty, rate and total — last 30 days',   'sort_order'=>20, 'permission'=>'all'],
+                ['key'=>'sales_transactions',    'label'=>'Sales Transactions',          'subtitle'=>'Every sale entry with customer, qty, rate and user — last 7 days',          'sort_order'=>30, 'permission'=>'all'],
+                ['key'=>'production_transactions','label'=>'Productions Report',         'subtitle'=>'All production entries with quantities and user — last 7 days',             'sort_order'=>40, 'permission'=>'all'],
+                ['key'=>'vendor_purchase_report', 'label'=>'Vendor Purchase Report',     'subtitle'=>'All purchases by vendor with product, qty, rate and amount',                'sort_order'=>50, 'permission'=>'all'],
+                ['key'=>'stock',                 'label'=>'Stock',                       'subtitle'=>'30-day running stock balance across all products',                          'sort_order'=>60, 'permission'=>'all'],
+                ['key'=>'vendor_ledger',         'label'=>'Vendor Ledger',               'subtitle'=>'Payment tracking — purchases, payments and balance due per vendor',         'sort_order'=>70, 'permission'=>'finance'],
+                ['key'=>'cashflow_report',       'label'=>'Cash Flow Report',            'subtitle'=>'Daily cash position — sales, purchases, payments and running balance',      'sort_order'=>80, 'permission'=>'finance'],
+                ['key'=>'profitability_report',  'label'=>'Profitability Report',        'subtitle'=>'Cost vs value per production flow — last 30 days',                          'sort_order'=>90, 'permission'=>'finance'],
+                ['key'=>'funds_report',          'label'=>'Funds Report',                'subtitle'=>'Sales revenue, stock value, vendor dues and free cash',                     'sort_order'=>100,'permission'=>'finance'],
+                ['key'=>'stock_valuation',       'label'=>'Stock Valuation',             'subtitle'=>'Stock quantities with estimated values per product',                        'sort_order'=>110,'permission'=>'finance'],
+                ['key'=>'madhusudan_pnl',        'label'=>'Madhusudan P&L',              'subtitle'=>'FF Milk direct sale — revenue, cost and profit per transaction',            'sort_order'=>120,'permission'=>'all'],
+                ['key'=>'pouch_pnl',             'label'=>'Pouch P&L',                   'subtitle'=>'Pouch production — revenue, cost and profit per batch',                    'sort_order'=>130,'permission'=>'all'],
+                ['key'=>'pouch_stock',           'label'=>'Pouch Stock',                 'subtitle'=>'Per-type pouch production balance',                                         'sort_order'=>140,'permission'=>'all'],
+                ['key'=>'pouch_types',           'label'=>'Pouch Types',                 'subtitle'=>'Manage pouch types — name, litre, price',                                   'sort_order'=>150,'permission'=>'all'],
+            ];
+            foreach ($reports as $rpt) {
+                $db->insert('wp_mf_3_dp_report_menu', $rpt);
+            }
+            $this->check_db('ensure_dahi_product.report_menu_seed');
+        }
+
+        // Add Cash+Stock Report to menu if not exists
+        $cs_exists = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_report_menu WHERE `key`='cash_stock_report'");
+        if (!$cs_exists) {
+            $db->insert('wp_mf_3_dp_report_menu', [
+                'key'         => 'cash_stock_report',
+                'label'       => 'Cash + Stock Report',
+                'subtitle'    => 'Daily cash position with stock valuation across products',
+                'sort_order'  => 85,
+                'permission'  => 'finance',
+            ]);
+            $this->check_db('ensure_dahi_product.cash_stock_report_seed');
+        }
+
+        // Rename Production Transactions → Productions Report
+        $db->query("UPDATE wp_mf_3_dp_report_menu SET label='Productions Report' WHERE `key`='production_transactions' AND label='Production Transactions'");
+        $this->check_db('ensure_dahi_product.rename_production_transactions');
+
+        // Deactivate individual P&L reports (covered by Profitability Report) and move Pouch Types to Admin
+        $db->query("UPDATE wp_mf_3_dp_report_menu SET is_active=0 WHERE `key` IN ('madhusudan_pnl','pouch_pnl','pouch_types','funds_report') AND is_active=1");
+        $this->check_db('ensure_dahi_product.deactivate_pnl_reports');
+
+        // ── Location sort_order column ──
+        $loc_sort_exists = (int) $db->get_var("SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'wp_mf_3_dp_locations'
+              AND COLUMN_NAME = 'sort_order'");
+        if (!$loc_sort_exists) {
+            $db->query("ALTER TABLE wp_mf_3_dp_locations ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER code");
+            $this->check_db('ensure_dahi_product.locations_sort_order');
+            // Seed: alphabetical order
+            $locs = $db->get_results("SELECT id FROM wp_mf_3_dp_locations ORDER BY name", ARRAY_A);
+            $s = 10;
+            foreach ($locs ?: [] as $loc_row) {
+                $db->update('wp_mf_3_dp_locations', ['sort_order' => $s], ['id' => (int)$loc_row['id']]);
+                $s += 10;
+            }
+            $this->check_db('ensure_dahi_product.locations_sort_order_seed');
+        }
+
         // Deactivate Dahi product (replaced by Curd) and hide its production flow
         $dahi_active = (int) $db->get_var("SELECT is_active FROM wp_mf_3_dp_products WHERE id=6");
         if ($dahi_active === 1) {
@@ -653,6 +760,55 @@ class Dairy_Production_API {
             ");
             $this->check_db('ensure_dahi_product.seed_customer_location_access');
         }
+
+        // ── Matka product (ingredient, like SMP/Protein/Culture) ──
+        $matka_exists = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_products WHERE id=11");
+        if (!$matka_exists) {
+            $db->insert('wp_mf_3_dp_products', [
+                'id' => 11, 'name' => 'Matka', 'unit' => 'pcs',
+                'is_active' => 1, 'sort_order' => 11,
+            ]);
+            $this->check_db('ensure_dahi_product.matka_product');
+        }
+        $matka_rate_exists = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_estimated_rates WHERE product_id=11");
+        if (!$matka_rate_exists) {
+            $db->insert('wp_mf_3_dp_estimated_rates', ['product_id' => 11, 'rate' => '15.00']);
+            $this->check_db('ensure_dahi_product.matka_rate');
+        }
+
+        // ── Add SMP/Protein/Culture input columns to curd_production ──
+        $curd_smp_exists = (int) $db->get_var("SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'wp_mf_3_dp_curd_production'
+              AND COLUMN_NAME = 'input_smp_bags'");
+        if (!$curd_smp_exists) {
+            $db->query("ALTER TABLE wp_mf_3_dp_curd_production
+                ADD COLUMN input_smp_bags INT UNSIGNED NOT NULL DEFAULT 0 AFTER output_curd_matka,
+                ADD COLUMN input_protein_kg DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER input_smp_bags,
+                ADD COLUMN input_culture_kg DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER input_protein_kg");
+            $this->check_db('ensure_dahi_product.curd_production_add_ingredients');
+        }
+
+        // ── Report Email Schedules table ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_report_email_schedules (
+                id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                report_key   VARCHAR(50) NOT NULL,
+                emails       TEXT NOT NULL,
+                frequency    VARCHAR(20) NOT NULL DEFAULT 'daily',
+                day_of_week  TINYINT NULL COMMENT '0=Sun..6=Sat for weekly',
+                day_of_month TINYINT NULL COMMENT '1-28 for monthly',
+                time_hour    TINYINT NOT NULL DEFAULT 8 COMMENT '0-23 IST hour',
+                location_id  INT UNSIGNED NULL COMMENT 'NULL = all locations',
+                is_active    TINYINT(1) NOT NULL DEFAULT 1,
+                last_sent_at DATETIME NULL,
+                created_by   BIGINT UNSIGNED NOT NULL,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                KEY idx_res_active (is_active)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.report_email_schedules_table');
     }
 
     public function register_routes(): void {
@@ -716,8 +872,15 @@ class Dairy_Production_API {
         $this->r('/curd-production',    'GET',  'get_curd_productions',    $auth);
         $this->r('/curd-production',    'POST', 'save_curd_production',    $auth);
         $this->r('/production-flows',   'GET',  'get_production_flows',    $auth);
-        $this->r('/cashflow-report',    'GET',  'get_cashflow_report',     $auth);
-        $this->r('/sales-ledger',       'GET',  'get_sales_ledger',        $auth);
+        $this->r('/cashflow-report',       'GET',  'get_cashflow_report',       $auth);
+        $this->r('/cash-stock-report',     'GET',  'get_cash_stock_report',     $auth);
+        $this->r('/sales-ledger',          'GET',  'get_sales_ledger',          $auth);
+        $this->r('/profitability-report',  'GET',  'get_profitability_report',  $auth);
+        $this->r('/report-menu',           'GET',  'get_report_menu',           $auth);
+        $this->r('/report-email-schedules',     'GET',  'get_report_email_schedules',     $auth);
+        $this->r('/report-email-schedule',      'POST', 'save_report_email_schedule',     $auth);
+        $this->r('/report-email-schedule/(?P<id>\\d+)', 'DELETE', 'delete_report_email_schedule', $auth);
+        $this->r('/report-email-schedule/(?P<id>\\d+)/send', 'POST', 'test_report_email',  $auth);
     }
 
     private function r( string $path, string $method, string $cb, array $extra = [] ): void {
@@ -917,7 +1080,7 @@ class Dairy_Production_API {
 
             foreach ($milk_usage as $mu) {
                 $mu_data = [
-                    'flow_type'   => 'milk_cream',
+                    'flow_type'   => self::FLOW_FF_MILK,
                     'flow_id'     => $flow_id,
                     'location_id' => $loc,
                     'entry_date'  => $r['entry_date'],
@@ -1533,12 +1696,15 @@ class Dairy_Production_API {
     // ════════════════════════════════════════════════════
 
     public function get_sales_report( WP_REST_Request $r ): WP_REST_Response {
-        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        $loc = (int) ($r->get_param('location_id') ?? 0);
+        if ($loc) {
+            if ($e = $this->check_location_access($this->uid(), $loc)) return $e;
+        }
         try {
             $db   = $this->db();
-            $loc  = (int) $r['location_id'];
             $from = $r['from'] ?? date('Y-m-d', strtotime('-29 days'));
             $to   = $r['to']   ?? date('Y-m-d');
+            $loc_cond = $loc ? $db->prepare(' AND location_id = %d', $loc) : '';
 
             // Column order: Skim Milk, Curd, Ghee, Butter, Cream, FF Milk
             $col_order = [2, 10, 5, 4, 3, 1];
@@ -1550,48 +1716,71 @@ class Dairy_Production_API {
             $this->check_db('sales_report.products');
             $prod_map = array_column($all_products, 'name', 'id');
 
-            // Aggregate: SUM(qty) and SUM(qty*rate) per day per product
-            $rows = $db->get_results($db->prepare(
-                "SELECT entry_date,
-                        product_id,
-                        SUM(quantity_kg)        AS qty_kg,
-                        SUM(quantity_kg * rate) AS total_value
-                   FROM wp_mf_3_dp_sales
-                  WHERE location_id = %d
-                    AND entry_date BETWEEN %s AND %s
-                  GROUP BY entry_date, product_id
-                  ORDER BY entry_date DESC, product_id",
-                $loc, $from, $to
-            ), ARRAY_A);
+            // Aggregate: SUM(qty) and SUM(qty*rate) per day per location per product
+            // When a specific location is selected, group by date+product only.
+            // When "All", group by date+location+product to show per-location rows.
+            if ($loc) {
+                $rows = $db->get_results($db->prepare(
+                    "SELECT s.entry_date, s.product_id,
+                            SUM(s.quantity_kg)        AS qty_kg,
+                            SUM(s.quantity_kg * s.rate) AS total_value,
+                            NULL AS location_name
+                       FROM wp_mf_3_dp_sales s
+                      WHERE s.entry_date BETWEEN %s AND %s $loc_cond
+                      GROUP BY s.entry_date, s.product_id
+                      ORDER BY s.entry_date DESC, s.product_id",
+                    $from, $to
+                ), ARRAY_A);
+            } else {
+                $rows = $db->get_results($db->prepare(
+                    "SELECT s.entry_date, s.product_id, l.name AS location_name,
+                            s.location_id,
+                            SUM(s.quantity_kg)        AS qty_kg,
+                            SUM(s.quantity_kg * s.rate) AS total_value
+                       FROM wp_mf_3_dp_sales s
+                       JOIN wp_mf_3_dp_locations l ON l.id = s.location_id
+                      WHERE s.entry_date BETWEEN %s AND %s
+                        AND l.code != 'TEST'
+                      GROUP BY s.entry_date, s.location_id, s.product_id
+                      ORDER BY s.entry_date DESC, l.name, s.product_id",
+                    $from, $to
+                ), ARRAY_A);
+            }
             $this->check_db('sales_report.rows');
 
-            // Pivot: build one row per date with a cell per product
-            $by_date = [];
+            // Pivot: build one row per (date, location) with a cell per product
+            $grouped = [];
             foreach ($rows as $row) {
                 $d   = $row['entry_date'];
+                $loc_name = $row['location_name'] ?? null;
+                $key = $loc ? $d : $d . '|' . ($row['location_id'] ?? '');
                 $pid = (int) $row['product_id'];
-                if (!isset($by_date[$d])) $by_date[$d] = [];
-                $by_date[$d][$pid] = [
+                if (!isset($grouped[$key])) {
+                    $grouped[$key] = ['date' => $d, 'location_name' => $loc_name, 'cells' => []];
+                }
+                $grouped[$key]['cells'][$pid] = [
                     'qty_kg'      => (int)   $row['qty_kg'],
                     'total_value' => (float) $row['total_value'],
                 ];
             }
 
-            // Build ordered date rows — only dates that have at least one sale
+            // Build ordered rows
             $report = [];
-            foreach ($by_date as $date => $cells) {
+            foreach ($grouped as $g) {
                 $row_total = 0;
                 $products  = [];
                 foreach ($col_order as $pid) {
-                    $cell = $cells[$pid] ?? null;
+                    $cell = $g['cells'][$pid] ?? null;
                     $row_total += $cell['total_value'] ?? 0;
-                    $products[$pid] = $cell; // null = no sale that day
+                    $products[$pid] = $cell;
                 }
-                $report[] = [
-                    'date'      => $date,
+                $entry = [
+                    'date'      => $g['date'],
                     'products'  => $products,
                     'row_total' => round($row_total, 2),
                 ];
+                if ($g['location_name'] !== null) $entry['location_name'] = $g['location_name'];
+                $report[] = $entry;
             }
 
             return $this->ok([
@@ -1610,79 +1799,92 @@ class Dairy_Production_API {
     // ════════════════════════════════════════════════════
 
     public function get_vendor_purchase_report( WP_REST_Request $r ): WP_REST_Response {
-        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
         try {
             $db   = $this->db();
-            $loc  = (int) $r['location_id'];
-            $from = $r['from'] ?? date('Y-m-d', strtotime('-29 days'));
-            $to   = $r['to']   ?? date('Y-m-d');
+            $loc  = (int) ($r->get_param('location_id') ?? 0);
+            $from = $r->get_param('from') ?? date('Y-m-d', strtotime('-29 days'));
+            $to   = $r->get_param('to')   ?? date('Y-m-d');
+
+            // When a specific location, check access
+            if ($loc) {
+                if ($e = $this->check_location_access($this->uid(), $loc)) return $e;
+            }
+
+            $loc_cond   = $loc ? $db->prepare(' AND t.location_id = %d', $loc) : '';
+            $loc_sel    = $loc ? 'NULL AS location_name' : 'l.name AS location_name';
+            $loc_join   = $loc ? '' : ' JOIN wp_mf_3_dp_locations l ON l.id = t.location_id';
+            $test_cond  = $loc ? '' : " AND l.code != 'TEST'";
 
             $rows = [];
 
             // FF Milk purchases (input_ff_milk_kg > 0)
             $ff = $db->get_results($db->prepare(
-                "SELECT m.entry_date,
+                "SELECT t.entry_date, $loc_sel,
                         COALESCE(v.name, 'Unknown Vendor') AS vendor,
                         'FF Milk'        AS product,
-                        m.input_ff_milk_kg AS quantity_kg,
-                        m.input_fat      AS fat,
-                        m.input_rate     AS rate,
-                        (m.input_ff_milk_kg * m.input_rate) AS amount
-                   FROM wp_mf_3_dp_milk_cream_production m
-                   LEFT JOIN wp_mf_3_dp_vendors v ON v.id = m.vendor_id
-                  WHERE m.location_id = %d
-                    AND m.entry_date BETWEEN %s AND %s
-                    AND m.input_ff_milk_kg > 0
-                  ORDER BY m.entry_date DESC, vendor",
-                $loc, $from, $to
+                        t.input_ff_milk_kg AS quantity_kg,
+                        t.input_fat      AS fat,
+                        t.input_rate     AS rate,
+                        ROUND(t.input_ff_milk_kg * t.input_rate, 2) AS amount
+                   FROM wp_mf_3_dp_milk_cream_production t
+                   $loc_join
+                   LEFT JOIN wp_mf_3_dp_vendors v ON v.id = t.vendor_id
+                  WHERE t.input_ff_milk_kg > 0
+                    AND t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                  ORDER BY t.entry_date DESC, vendor",
+                $from, $to
             ), ARRAY_A);
             $this->check_db('vendor_report.ff_milk');
             $rows = array_merge($rows, $ff ?? []);
 
             // Cream purchases (input_cream_kg > 0)
             $cream = $db->get_results($db->prepare(
-                "SELECT c.entry_date,
+                "SELECT t.entry_date, $loc_sel,
                         COALESCE(v.name, 'Unknown Vendor') AS vendor,
                         'Cream'          AS product,
-                        c.input_cream_kg AS quantity_kg,
-                        c.input_fat      AS fat,
-                        c.input_rate     AS rate,
-                        (c.input_cream_kg * c.input_rate) AS amount
-                   FROM wp_mf_3_dp_cream_butter_ghee c
-                   LEFT JOIN wp_mf_3_dp_vendors v ON v.id = c.vendor_id
-                  WHERE c.location_id = %d
-                    AND c.entry_date BETWEEN %s AND %s
-                    AND c.input_cream_kg > 0
-                  ORDER BY c.entry_date DESC, vendor",
-                $loc, $from, $to
+                        t.input_cream_kg AS quantity_kg,
+                        t.input_fat      AS fat,
+                        t.input_rate     AS rate,
+                        ROUND(t.input_cream_kg * t.input_rate, 2) AS amount
+                   FROM wp_mf_3_dp_cream_butter_ghee t
+                   $loc_join
+                   LEFT JOIN wp_mf_3_dp_vendors v ON v.id = t.vendor_id
+                  WHERE t.input_cream_kg > 0
+                    AND t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                  ORDER BY t.entry_date DESC, vendor",
+                $from, $to
             ), ARRAY_A);
             $this->check_db('vendor_report.cream');
             $rows = array_merge($rows, $cream ?? []);
 
             // Butter purchases (input_butter_kg > 0)
             $butter = $db->get_results($db->prepare(
-                "SELECT b.entry_date,
+                "SELECT t.entry_date, $loc_sel,
                         COALESCE(v.name, 'Unknown Vendor') AS vendor,
                         'Butter'          AS product,
-                        b.input_butter_kg AS quantity_kg,
-                        b.input_fat       AS fat,
-                        b.input_rate      AS rate,
-                        (b.input_butter_kg * b.input_rate) AS amount
-                   FROM wp_mf_3_dp_butter_ghee b
-                   LEFT JOIN wp_mf_3_dp_vendors v ON v.id = b.vendor_id
-                  WHERE b.location_id = %d
-                    AND b.entry_date BETWEEN %s AND %s
-                    AND b.input_butter_kg > 0
-                  ORDER BY b.entry_date DESC, vendor",
-                $loc, $from, $to
+                        t.input_butter_kg AS quantity_kg,
+                        t.input_fat       AS fat,
+                        t.input_rate      AS rate,
+                        ROUND(t.input_butter_kg * t.input_rate, 2) AS amount
+                   FROM wp_mf_3_dp_butter_ghee t
+                   $loc_join
+                   LEFT JOIN wp_mf_3_dp_vendors v ON v.id = t.vendor_id
+                  WHERE t.input_butter_kg > 0
+                    AND t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                  ORDER BY t.entry_date DESC, vendor",
+                $from, $to
             ), ARRAY_A);
             $this->check_db('vendor_report.butter');
             $rows = array_merge($rows, $butter ?? []);
 
-            // Sort combined rows by date desc, then vendor
-            usort($rows, fn($a, $b) =>
-                strcmp($b['entry_date'], $a['entry_date']) ?: strcmp($a['vendor'], $b['vendor'])
-            );
+            // Sort combined rows by date desc, then location, then vendor
+            usort($rows, function($a, $b) {
+                $d = strcmp($b['entry_date'], $a['entry_date']);
+                if ($d !== 0) return $d;
+                $l = strcmp($a['location_name'] ?? '', $b['location_name'] ?? '');
+                if ($l !== 0) return $l;
+                return strcmp($a['vendor'], $b['vendor']);
+            });
 
             // Grand totals
             $total_qty    = array_sum(array_column($rows, 'quantity_kg'));
@@ -1712,12 +1914,14 @@ class Dairy_Production_API {
             $smp         = $this->d2($r->get_param('smp_bags')     ?? 0);
             $protein     = $this->d2($r->get_param('protein_kg')   ?? 0);
             $culture     = $this->d2($r->get_param('culture_kg')   ?? 0);
+            $matka       = $this->d2($r->get_param('matka_qty')    ?? 0);
             $smp_rate     = $this->d2($r->get_param('smp_rate')     ?? 0);
             $protein_rate = $this->d2($r->get_param('protein_rate') ?? 0);
             $culture_rate = $this->d2($r->get_param('culture_rate') ?? 0);
+            $matka_rate   = $this->d2($r->get_param('matka_rate')   ?? 0);
 
-            if ($smp <= 0 && $protein <= 0 && $culture <= 0) {
-                return $this->err('At least one of SMP, Protein, or Culture must be non-zero.');
+            if ($smp <= 0 && $protein <= 0 && $culture <= 0 && $matka <= 0) {
+                return $this->err('At least one of SMP, Protein, Culture, or Matka must be non-zero.');
             }
 
             $db  = $this->db();
@@ -1754,6 +1958,16 @@ class Dairy_Production_API {
                 $this->audit('wp_mf_3_dp_ingredient_purchase', $db->insert_id, 'INSERT', null, $data, $loc);
                 $saved[] = 'Culture';
             }
+            if ($matka > 0) {
+                $data = ['location_id'=>$loc,'entry_date'=>$entry_date,
+                         'product_id'=>11,'quantity'=>$matka,'rate'=>$matka_rate,'created_by'=>$uid];
+                if ($db->insert('wp_mf_3_dp_ingredient_purchase', $data) === false) {
+                    $this->log_db('save_smp_purchase.matka', $db->last_error);
+                    return $this->err('Database error saving Matka.', 500);
+                }
+                $this->audit('wp_mf_3_dp_ingredient_purchase', $db->insert_id, 'INSERT', null, $data, $loc);
+                $saved[] = 'Matka';
+            }
 
             return $this->ok(['saved' => $saved], 201);
         } catch (\Exception $e) { return $this->exc('save_smp_purchase', $e); }
@@ -1778,28 +1992,13 @@ class Dairy_Production_API {
             // Each UNION ALL row is one movement type for one product.
             $prod_rows = $db->get_results($db->prepare(
                 $this->stock_movements_sql(),
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to,
-                $loc,$from,$to
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                $loc,$from,$to, $loc,$from,$to, $loc,$from,$to
             ), ARRAY_A);
             $this->check_db('get_stock.production');
             $sales_rows = $db->get_results($db->prepare(
@@ -2035,82 +2234,130 @@ class Dairy_Production_API {
     public function get_vendor_ledger( WP_REST_Request $r ): WP_REST_Response {
         if ($e = $this->check_finance_access($this->uid())) return $e;
         try {
-            $db     = $this->db();
-            $from   = sanitize_text_field($r->get_param('from') ?? date('Y-m-d', strtotime('-90 days')));
-            $to     = sanitize_text_field($r->get_param('to')   ?? date('Y-m-d'));
-            $loc_id = (int) ($r->get_param('location_id') ?? 0);
+            $db        = $this->db();
+            $from      = sanitize_text_field($r->get_param('from') ?? date('Y-m-d', strtotime('-90 days')));
+            $to        = sanitize_text_field($r->get_param('to')   ?? date('Y-m-d'));
+            $loc_id    = (int) ($r->get_param('location_id') ?? 0);
+            $vendor_id = (int) ($r->get_param('vendor_id') ?? 0);
 
-            // Vendor list — optionally filtered by location assignment
-            if ($loc_id) {
-                $vendors = $db->get_results($db->prepare(
-                    "SELECT v.id, v.name FROM wp_mf_3_dp_vendors v
-                     JOIN wp_mf_3_dp_vendor_location_access vla ON vla.vendor_id = v.id
-                     WHERE v.is_active=1 AND vla.location_id = %d ORDER BY v.name", $loc_id), ARRAY_A);
-            } else {
-                $vendors = $db->get_results(
-                    "SELECT id, name FROM wp_mf_3_dp_vendors WHERE is_active=1 ORDER BY name", ARRAY_A);
-            }
-            $this->check_db('vendor_ledger.vendors');
+            $loc_cond   = $loc_id    ? $db->prepare(' AND t.location_id = %d', $loc_id)    : '';
+            $vend_cond  = $vendor_id ? $db->prepare(' AND t.vendor_id = %d', $vendor_id)   : '';
+            $vend_cond_p= $vendor_id ? $db->prepare(' AND p.vendor_id = %d', $vendor_id)   : '';
+            $test_cond  = $loc_id    ? '' : " AND l.code != 'TEST'";
 
-            // Purchases from 3 production tables — optionally filtered by location
-            $loc_where_mcp = $loc_id ? $db->prepare(" AND location_id = %d", $loc_id) : '';
-            $loc_where_cbg = $loc_where_mcp;
-            $loc_where_bg  = $loc_where_mcp;
-
-            $purchase_sql = $db->prepare("
-                SELECT vendor_id, SUM(amount) AS total FROM (
-                    SELECT vendor_id, ROUND(input_ff_milk_kg * input_rate, 2) AS amount
-                      FROM wp_mf_3_dp_milk_cream_production
-                     WHERE vendor_id IS NOT NULL AND input_ff_milk_kg > 0
-                       AND entry_date BETWEEN %s AND %s $loc_where_mcp
+            // Purchases grouped by date + location + vendor
+            $purch = $db->get_results($db->prepare("
+                SELECT dt AS date, loc AS location_name, vend AS vendor_name,
+                       ROUND(SUM(amt), 2) AS purchases
+                  FROM (
+                    SELECT t.entry_date AS dt, l.name AS loc, v.name AS vend,
+                           (t.input_ff_milk_kg * t.input_rate) AS amt
+                      FROM wp_mf_3_dp_milk_cream_production t
+                      JOIN wp_mf_3_dp_locations l ON l.id = t.location_id
+                      JOIN wp_mf_3_dp_vendors v ON v.id = t.vendor_id
+                     WHERE t.input_ff_milk_kg > 0
+                       AND t.entry_date BETWEEN %s AND %s $loc_cond $vend_cond $test_cond
                     UNION ALL
-                    SELECT vendor_id, ROUND(input_cream_kg * input_rate, 2) AS amount
-                      FROM wp_mf_3_dp_cream_butter_ghee
-                     WHERE vendor_id IS NOT NULL AND input_cream_kg > 0
-                       AND entry_date BETWEEN %s AND %s $loc_where_cbg
+                    SELECT t.entry_date, l.name, v.name,
+                           (t.input_cream_kg * t.input_rate)
+                      FROM wp_mf_3_dp_cream_butter_ghee t
+                      JOIN wp_mf_3_dp_locations l ON l.id = t.location_id
+                      JOIN wp_mf_3_dp_vendors v ON v.id = t.vendor_id
+                     WHERE t.input_cream_kg > 0
+                       AND t.entry_date BETWEEN %s AND %s $loc_cond $vend_cond $test_cond
                     UNION ALL
-                    SELECT vendor_id, ROUND(input_butter_kg * input_rate, 2) AS amount
-                      FROM wp_mf_3_dp_butter_ghee
-                     WHERE vendor_id IS NOT NULL AND input_butter_kg > 0
-                       AND entry_date BETWEEN %s AND %s $loc_where_bg
-                ) AS purchases GROUP BY vendor_id
-            ", $from, $to, $from, $to, $from, $to);
-            $purchase_rows = $db->get_results($purchase_sql, ARRAY_A);
+                    SELECT t.entry_date, l.name, v.name,
+                           (t.input_butter_kg * t.input_rate)
+                      FROM wp_mf_3_dp_butter_ghee t
+                      JOIN wp_mf_3_dp_locations l ON l.id = t.location_id
+                      JOIN wp_mf_3_dp_vendors v ON v.id = t.vendor_id
+                     WHERE t.input_butter_kg > 0
+                       AND t.entry_date BETWEEN %s AND %s $loc_cond $vend_cond $test_cond
+                  ) sub
+                 GROUP BY dt, loc, vend
+            ", $from, $to, $from, $to, $from, $to), ARRAY_A);
             $this->check_db('vendor_ledger.purchases');
 
-            $purchases = [];
-            foreach ($purchase_rows as $row) $purchases[(int)$row['vendor_id']] = (float) $row['total'];
-
-            // Payments — always unfiltered (global)
-            $payment_rows = $db->get_results($db->prepare("
-                SELECT vendor_id, SUM(amount) AS total
-                  FROM wp_mf_3_dp_vendor_payments
-                 WHERE payment_date BETWEEN %s AND %s
-                 GROUP BY vendor_id
+            // Payments grouped by date + vendor (no location)
+            $pays = $db->get_results($db->prepare("
+                SELECT p.payment_date AS date, v.name AS vendor_name,
+                       ROUND(SUM(p.amount), 2) AS payments
+                  FROM wp_mf_3_dp_vendor_payments p
+                  JOIN wp_mf_3_dp_vendors v ON v.id = p.vendor_id
+                 WHERE p.payment_date BETWEEN %s AND %s $vend_cond_p
+                 GROUP BY p.payment_date, v.name
             ", $from, $to), ARRAY_A);
             $this->check_db('vendor_ledger.payments');
 
-            $payments = [];
-            foreach ($payment_rows as $row) $payments[(int)$row['vendor_id']] = (float) $row['total'];
-
-            $result = [];
-            foreach ($vendors as $v) {
-                $vid  = (int) $v['id'];
-                $tp   = $purchases[$vid] ?? 0.0;
-                $tpay = $payments[$vid]  ?? 0.0;
-                if ($tp == 0 && $tpay == 0) continue; // skip vendors with no activity
-                $result[] = [
-                    'vendor_id'       => $vid,
-                    'vendor_name'     => $v['name'],
-                    'total_purchases' => round($tp, 2),
-                    'total_payments'  => round($tpay, 2),
-                    'balance_due'     => round($tp - $tpay, 2),
-                ];
+            // Merge into map keyed by date|vendor
+            $map = [];
+            foreach ($purch ?: [] as $r2) {
+                $key = $r2['date'] . '|' . $r2['vendor_name'];
+                if (!isset($map[$key])) {
+                    $map[$key] = [
+                        'date' => $r2['date'],
+                        'locations' => [],
+                        'vendor_name' => $r2['vendor_name'],
+                        'purchases' => 0.0,
+                        'payments' => 0.0,
+                    ];
+                }
+                $map[$key]['purchases'] += (float)$r2['purchases'];
+                $ln = $r2['location_name'];
+                if ($ln && !in_array($ln, $map[$key]['locations'])) {
+                    $map[$key]['locations'][] = $ln;
+                }
             }
-            // Sort by balance_due descending
-            usort($result, fn($a, $b) => $b['balance_due'] <=> $a['balance_due']);
+            foreach ($pays ?: [] as $r2) {
+                $key = $r2['date'] . '|' . $r2['vendor_name'];
+                if (!isset($map[$key])) {
+                    $map[$key] = [
+                        'date' => $r2['date'],
+                        'locations' => [],
+                        'vendor_name' => $r2['vendor_name'],
+                        'purchases' => 0.0,
+                        'payments' => 0.0,
+                    ];
+                }
+                $map[$key]['payments'] += (float)$r2['payments'];
+            }
 
-            return $this->ok(['vendors' => $result, 'from' => $from, 'to' => $to]);
+            // Sort chronologically for running balance
+            $rows = array_values($map);
+            usort($rows, function($a, $b) {
+                $d = strcmp($a['date'], $b['date']);
+                if ($d !== 0) return $d;
+                return strcmp($a['vendor_name'], $b['vendor_name']);
+            });
+
+            // Running balance per vendor
+            $bal = [];
+            foreach ($rows as &$row) {
+                $v = $row['vendor_name'];
+                if (!isset($bal[$v])) $bal[$v] = 0.0;
+                $bal[$v] += $row['purchases'] - $row['payments'];
+                $row['balance']       = round($bal[$v], 2);
+                $row['purchases']     = round($row['purchases'], 2);
+                $row['payments']      = round($row['payments'], 2);
+                $row['location_name'] = implode(', ', $row['locations']);
+                unset($row['locations']);
+            }
+            unset($row);
+
+            // Reverse for date DESC display
+            $rows = array_reverse($rows);
+
+            // Vendor list for dropdown
+            $vendors = $db->get_results(
+                "SELECT id, name FROM wp_mf_3_dp_vendors WHERE is_active=1 ORDER BY name", ARRAY_A);
+            $this->check_db('vendor_ledger.vendor_list');
+
+            return $this->ok([
+                'rows'    => $rows,
+                'vendors' => $vendors ?? [],
+                'from'    => $from,
+                'to'      => $to,
+            ]);
         } catch (\Exception $e) { return $this->exc('get_vendor_ledger', $e); }
     }
 
@@ -2587,7 +2834,7 @@ class Dairy_Production_API {
 
             foreach ($milk_usage as $mu) {
                 $mu_data = [
-                    'flow_type'   => 'madhusudan',
+                    'flow_type'   => self::FLOW_MADHUSUDAN,
                     'flow_id'     => $sale_id,
                     'location_id' => $loc,
                     'entry_date'  => $r['entry_date'],
@@ -2652,7 +2899,7 @@ class Dairy_Production_API {
                 // Get milk_usage rows for this sale
                 $usages = $db->get_results($db->prepare(
                     "SELECT vendor_id, ff_milk_kg FROM wp_mf_3_dp_milk_usage
-                      WHERE flow_type='madhusudan' AND flow_id=%d AND location_id=%d",
+                      WHERE flow_type='" . self::FLOW_MADHUSUDAN . "' AND flow_id=%d AND location_id=%d",
                     $sale_id, $loc
                 ), ARRAY_A);
                 $this->check_db('get_madhusudan_pnl.usage');
@@ -2734,6 +2981,9 @@ class Dairy_Production_API {
                 'output_cream_kg'   => (int) $r['output_cream_kg'],
                 'output_cream_fat'  => $this->d1($r['output_cream_fat']),
                 'output_curd_matka' => (int) $r['output_curd_matka'],
+                'input_smp_bags'    => (int) ($r->get_param('input_smp_bags') ?? 0),
+                'input_protein_kg'  => $this->d2($r->get_param('input_protein_kg') ?? 0),
+                'input_culture_kg'  => $this->d2($r->get_param('input_culture_kg') ?? 0),
                 'created_by'        => $this->uid(),
             ];
             if ($db->insert('wp_mf_3_dp_curd_production', $data) === false) {
@@ -2746,7 +2996,7 @@ class Dairy_Production_API {
 
             foreach ($milk_usage as $mu) {
                 $mu_data = [
-                    'flow_type'   => 'curd',
+                    'flow_type'   => self::FLOW_CURD,
                     'flow_id'     => $prod_id,
                     'location_id' => $loc,
                     'entry_date'  => $r['entry_date'],
@@ -2805,52 +3055,41 @@ class Dairy_Production_API {
             $loc  = (int) ($r->get_param('location_id') ?? 0);
             $loc_cond   = $loc ? $db->prepare(' AND location_id = %d', $loc) : '';
 
-            // ── Sales per day (includes madhusudan) ──
-            $sales_q = "SELECT entry_date AS d, ROUND(SUM(quantity_kg * rate), 2) AS amt
-                          FROM wp_mf_3_dp_sales
-                         WHERE entry_date BETWEEN %s AND %s $loc_cond
-                         GROUP BY entry_date";
-            $sales = $db->get_results($db->prepare($sales_q, $from, $to), ARRAY_A);
+            // When "All" (no loc), group by date+location; when specific loc, group by date only
+            $grp_col  = $loc ? '' : ', location_id';
+            $grp_join = $loc ? '' : ' JOIN wp_mf_3_dp_locations l ON l.id = t.location_id';
+            $grp_sel  = $loc ? 'NULL AS location_id, NULL AS location_name' : 't.location_id, l.name AS location_name';
+            $test_cond = $loc ? '' : " AND l.code != 'TEST'";
+
+            // Helper to run grouped aggregation query
+            // Returns array of ['d'=>date, 'location_id'=>int|null, 'location_name'=>str|null, 'amt'=>float]
+            $run_q = function($table, $amt_expr, $extra_where = '') use ($db, $from, $to, $loc, $loc_cond, $grp_col, $test_cond) {
+                $join = '';
+                $sel_loc = $loc ? 'NULL AS location_id, NULL AS location_name' : 't.location_id, l.name AS location_name';
+                if (!$loc) $join = ' JOIN wp_mf_3_dp_locations l ON l.id = t.location_id';
+                $sql = "SELECT t.entry_date AS d, $sel_loc, ROUND(SUM($amt_expr), 2) AS amt
+                          FROM $table t $join
+                         WHERE t.entry_date BETWEEN %s AND %s $loc_cond $extra_where $test_cond
+                         GROUP BY t.entry_date $grp_col";
+                // fix alias: loc_cond uses 'location_id' without alias, need 't.' prefix
+                $sql = str_replace(' AND location_id =', ' AND t.location_id =', $sql);
+                return $db->get_results($db->prepare($sql, $from, $to), ARRAY_A) ?: [];
+            };
+
+            $sales = $run_q('wp_mf_3_dp_sales', 't.quantity_kg * t.rate');
             $this->check_db('cashflow.sales');
-
-            $mad_q = "SELECT entry_date AS d, ROUND(SUM(total_ff_milk_kg * sale_rate), 2) AS amt
-                        FROM wp_mf_3_dp_madhusudan_sale
-                       WHERE entry_date BETWEEN %s AND %s $loc_cond
-                       GROUP BY entry_date";
-            $mad = $db->get_results($db->prepare($mad_q, $from, $to), ARRAY_A);
+            $mad = $run_q('wp_mf_3_dp_madhusudan_sale', 't.total_ff_milk_kg * t.sale_rate');
             $this->check_db('cashflow.madhusudan');
-
-            // ── Purchases per day (FF Milk + Cream + Butter + Ingredients) ──
-            $purch_ff = "SELECT entry_date AS d, ROUND(SUM(input_ff_milk_kg * input_rate), 2) AS amt
-                           FROM wp_mf_3_dp_milk_cream_production
-                          WHERE input_ff_milk_kg > 0 AND entry_date BETWEEN %s AND %s $loc_cond
-                          GROUP BY entry_date";
-            $pff = $db->get_results($db->prepare($purch_ff, $from, $to), ARRAY_A);
+            $pff = $run_q('wp_mf_3_dp_milk_cream_production', 't.input_ff_milk_kg * t.input_rate', ' AND t.input_ff_milk_kg > 0');
             $this->check_db('cashflow.purch_ff');
-
-            $purch_cr = "SELECT entry_date AS d, ROUND(SUM(input_cream_kg * input_rate), 2) AS amt
-                           FROM wp_mf_3_dp_cream_butter_ghee
-                          WHERE input_cream_kg > 0 AND entry_date BETWEEN %s AND %s $loc_cond
-                          GROUP BY entry_date";
-            $pcr = $db->get_results($db->prepare($purch_cr, $from, $to), ARRAY_A);
+            $pcr = $run_q('wp_mf_3_dp_cream_butter_ghee', 't.input_cream_kg * t.input_rate', ' AND t.input_cream_kg > 0');
             $this->check_db('cashflow.purch_cr');
-
-            $purch_bt = "SELECT entry_date AS d, ROUND(SUM(input_butter_kg * input_rate), 2) AS amt
-                           FROM wp_mf_3_dp_butter_ghee
-                          WHERE input_butter_kg > 0 AND entry_date BETWEEN %s AND %s $loc_cond
-                          GROUP BY entry_date";
-            $pbt = $db->get_results($db->prepare($purch_bt, $from, $to), ARRAY_A);
+            $pbt = $run_q('wp_mf_3_dp_butter_ghee', 't.input_butter_kg * t.input_rate', ' AND t.input_butter_kg > 0');
             $this->check_db('cashflow.purch_bt');
-
-            $purch_in = "SELECT entry_date AS d, ROUND(SUM(quantity * rate), 2) AS amt
-                           FROM wp_mf_3_dp_ingredient_purchase
-                          WHERE entry_date BETWEEN %s AND %s $loc_cond
-                          GROUP BY entry_date";
-            $pin = $db->get_results($db->prepare($purch_in, $from, $to), ARRAY_A);
+            $pin = $run_q('wp_mf_3_dp_ingredient_purchase', 't.quantity * t.rate');
             $this->check_db('cashflow.purch_in');
 
-            // ── Vendor payments per day ──
-            $pay_cond = $loc ? '' : ''; // payments are global, not per-location
+            // ── Vendor payments per day (global, not per-location) ──
             $pay_q = "SELECT payment_date AS d, ROUND(SUM(amount), 2) AS amt
                         FROM wp_mf_3_dp_vendor_payments
                        WHERE payment_date BETWEEN %s AND %s
@@ -2858,38 +3097,75 @@ class Dairy_Production_API {
             $pay = $db->get_results($db->prepare($pay_q, $from, $to), ARRAY_A);
             $this->check_db('cashflow.payments');
 
-            // ── Merge into daily map ──
-            $days = [];
-            $cur = new \DateTime($from);
-            $end = new \DateTime($to);
-            while ($cur <= $end) {
-                $days[$cur->format('Y-m-d')] = ['sales' => 0, 'purchases' => 0, 'payments' => 0];
-                $cur->modify('+1 day');
+            // ── Merge into (date, location) map ──
+            // key = "date" when single loc, "date|loc_id" when all
+            $map = [];
+            $loc_names = [];
+
+            $add = function($arr, $field) use (&$map, &$loc_names, $loc) {
+                foreach ($arr as $r2) {
+                    $lid = $r2['location_id'] ?? null;
+                    $key = $loc ? $r2['d'] : $r2['d'] . '|' . $lid;
+                    if (!isset($map[$key])) {
+                        $map[$key] = ['date' => $r2['d'], 'location_id' => $lid, 'sales' => 0, 'purchases' => 0, 'payments' => 0];
+                    }
+                    $map[$key][$field] += (float)$r2['amt'];
+                    if ($lid && isset($r2['location_name'])) $loc_names[$lid] = $r2['location_name'];
+                }
+            };
+
+            $add($sales, 'sales');
+            $add($mad, 'sales');
+            $add($pff, 'purchases');
+            $add($pcr, 'purchases');
+            $add($pbt, 'purchases');
+            $add($pin, 'purchases');
+
+            // Payments are global — when "All", distribute to a special "—" location row
+            // or just add as a single key per date with no location
+            foreach ($pay as $r2) {
+                if ($loc) {
+                    $key = $r2['d'];
+                    if (!isset($map[$key])) $map[$key] = ['date' => $r2['d'], 'location_id' => null, 'sales' => 0, 'purchases' => 0, 'payments' => 0];
+                    $map[$key]['payments'] += (float)$r2['amt'];
+                } else {
+                    // For "All", add payments to a "Payments" pseudo-location per date
+                    $key = $r2['d'] . '|PAY';
+                    if (!isset($map[$key])) $map[$key] = ['date' => $r2['d'], 'location_id' => 'PAY', 'sales' => 0, 'purchases' => 0, 'payments' => 0];
+                    $map[$key]['payments'] += (float)$r2['amt'];
+                }
             }
-            foreach ($sales as $r2) { $days[$r2['d']]['sales'] += (float)$r2['amt']; }
-            foreach ($mad   as $r2) { $days[$r2['d']]['sales'] += (float)$r2['amt']; }
-            foreach ($pff   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
-            foreach ($pcr   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
-            foreach ($pbt   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
-            foreach ($pin   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
-            foreach ($pay   as $r2) { $days[$r2['d']]['payments']  += (float)$r2['amt']; }
+
+            // Sort by date DESC, then location name
+            uksort($map, function($a, $b) { return strcmp($b, $a); });
 
             // ── Build rows with beginning/end cash ──
             $rows = [];
-            $cash = 0; // beginning cash starts at 0
-            foreach ($days as $date => $v) {
+            $cash = 0;
+            // Process in chronological order for running cash
+            $sorted_keys = array_keys($map);
+            sort($sorted_keys); // chronological
+            foreach ($sorted_keys as $key) {
+                $v = $map[$key];
                 $beg = round($cash, 2);
                 $end_cash = round($beg + $v['sales'] - $v['payments'], 2);
-                $rows[] = [
-                    'date'           => $date,
+                $row = [
+                    'date'           => $v['date'],
                     'beginning_cash' => $beg,
                     'sales'          => round($v['sales'], 2),
                     'purchases'      => round($v['purchases'], 2),
                     'payments'       => round($v['payments'], 2),
                     'end_cash'       => $end_cash,
                 ];
+                if (!$loc) {
+                    $lid = $v['location_id'];
+                    $row['location_name'] = ($lid === 'PAY') ? 'Payments' : ($loc_names[$lid] ?? '');
+                }
+                $rows[] = $row;
                 $cash = $end_cash;
             }
+            // Reverse for date DESC display
+            $rows = array_reverse($rows);
 
             return $this->ok([
                 'from' => $from,
@@ -2900,33 +3176,261 @@ class Dairy_Production_API {
     }
 
     // ════════════════════════════════════════════════════
+    // CASH + STOCK REPORT
+    // ════════════════════════════════════════════════════
+
+    public function get_cash_stock_report( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db   = $this->db();
+            $from = $r->get_param('from') ?: date('Y-m-d', strtotime('-29 days'));
+            $to   = $r->get_param('to')   ?: date('Y-m-d');
+            $loc  = (int) ($r->get_param('location_id') ?? 0);
+
+            // ── 1. Cash flow (grouped by date only) ──────────────
+            $loc_cond  = $loc ? $db->prepare(' AND t.location_id = %d', $loc) : '';
+            $test_cond = $loc ? '' : " AND l.code != 'TEST'";
+
+            $run_q = function($table, $amt_expr, $extra_where = '') use ($db, $from, $to, $loc_cond, $test_cond, $loc) {
+                $join = $loc ? '' : ' JOIN wp_mf_3_dp_locations l ON l.id = t.location_id';
+                $sql = "SELECT t.entry_date AS d, ROUND(SUM($amt_expr), 2) AS amt
+                          FROM $table t $join
+                         WHERE t.entry_date BETWEEN %s AND %s $loc_cond $extra_where $test_cond
+                         GROUP BY t.entry_date";
+                $sql = str_replace(' AND location_id =', ' AND t.location_id =', $sql);
+                return $db->get_results($db->prepare($sql, $from, $to), ARRAY_A) ?: [];
+            };
+
+            $sales = $run_q('wp_mf_3_dp_sales', 't.quantity_kg * t.rate');
+            $this->check_db('cash_stock.sales');
+            $mad = $run_q('wp_mf_3_dp_madhusudan_sale', 't.total_ff_milk_kg * t.sale_rate');
+            $this->check_db('cash_stock.madhusudan');
+            $pff = $run_q('wp_mf_3_dp_milk_cream_production', 't.input_ff_milk_kg * t.input_rate', ' AND t.input_ff_milk_kg > 0');
+            $this->check_db('cash_stock.purch_ff');
+            $pcr = $run_q('wp_mf_3_dp_cream_butter_ghee', 't.input_cream_kg * t.input_rate', ' AND t.input_cream_kg > 0');
+            $this->check_db('cash_stock.purch_cr');
+            $pbt = $run_q('wp_mf_3_dp_butter_ghee', 't.input_butter_kg * t.input_rate', ' AND t.input_butter_kg > 0');
+            $this->check_db('cash_stock.purch_bt');
+            $pin = $run_q('wp_mf_3_dp_ingredient_purchase', 't.quantity * t.rate');
+            $this->check_db('cash_stock.purch_in');
+
+            $pay_q = "SELECT payment_date AS d, ROUND(SUM(amount), 2) AS amt
+                        FROM wp_mf_3_dp_vendor_payments
+                       WHERE payment_date BETWEEN %s AND %s
+                       GROUP BY payment_date";
+            $pay = $db->get_results($db->prepare($pay_q, $from, $to), ARRAY_A);
+            $this->check_db('cash_stock.payments');
+
+            // Merge cash flow into date map
+            $cash_map = []; // date => [sales, purchases, payments]
+            $add_cash = function($arr, $field) use (&$cash_map) {
+                foreach ($arr as $r2) {
+                    $d = $r2['d'];
+                    if (!isset($cash_map[$d])) $cash_map[$d] = ['sales' => 0, 'purchases' => 0, 'payments' => 0];
+                    $cash_map[$d][$field] += (float)$r2['amt'];
+                }
+            };
+            $add_cash($sales, 'sales');
+            $add_cash($mad, 'sales');
+            $add_cash($pff, 'purchases');
+            $add_cash($pcr, 'purchases');
+            $add_cash($pbt, 'purchases');
+            $add_cash($pin, 'purchases');
+            $add_cash($pay ?: [], 'payments');
+
+            // ── 2. Stock movements (same location logic) ─────────
+            // Build stock SQL with flexible location filter
+            $stk_loc = $loc ? $db->prepare('location_id = %d', $loc) : 'location_id IN (SELECT id FROM wp_mf_3_dp_locations WHERE code != \'TEST\')';
+            $stk_q = $db->prepare("
+                SELECT entry_date, product_id, SUM(qty) AS qty FROM (
+                    SELECT entry_date, 1 AS product_id, CAST(input_ff_milk_kg AS SIGNED) AS qty
+                      FROM wp_mf_3_dp_milk_cream_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 1, -CAST(ff_milk_kg AS SIGNED)
+                      FROM wp_mf_3_dp_milk_usage WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 2, CAST(output_skim_milk_kg AS SIGNED)
+                      FROM wp_mf_3_dp_milk_cream_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
+                      FROM wp_mf_3_dp_milk_cream_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
+                      FROM wp_mf_3_dp_pouch_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 3, -CAST(input_cream_used_kg AS SIGNED)
+                      FROM wp_mf_3_dp_cream_butter_ghee WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 4, CAST(output_butter_kg AS SIGNED)
+                      FROM wp_mf_3_dp_cream_butter_ghee WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 4, -CAST(input_butter_used_kg AS SIGNED)
+                      FROM wp_mf_3_dp_butter_ghee WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
+                      FROM wp_mf_3_dp_cream_butter_ghee WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 5, CAST(output_ghee_kg AS SIGNED)
+                      FROM wp_mf_3_dp_butter_ghee WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 2, -CAST(input_skim_milk_kg AS SIGNED)
+                      FROM wp_mf_3_dp_dahi_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 7, CAST(quantity AS SIGNED)
+                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=7 AND $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 7, -CAST(input_smp_bags AS SIGNED)
+                      FROM wp_mf_3_dp_dahi_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 8, CAST(quantity AS SIGNED)
+                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=8 AND $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 8, -CAST(input_protein_kg AS SIGNED)
+                      FROM wp_mf_3_dp_dahi_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 9, CAST(quantity AS SIGNED)
+                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=9 AND $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 9, -CAST(input_culture_kg AS SIGNED)
+                      FROM wp_mf_3_dp_dahi_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 3, CAST(output_cream_kg AS SIGNED)
+                      FROM wp_mf_3_dp_curd_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 10, CAST(output_curd_matka AS SIGNED)
+                      FROM wp_mf_3_dp_curd_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 11, CAST(quantity AS SIGNED)
+                      FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=11 AND $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 11, -CAST(output_curd_matka AS SIGNED)
+                      FROM wp_mf_3_dp_curd_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 7, -CAST(input_smp_bags AS SIGNED)
+                      FROM wp_mf_3_dp_curd_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 8, -CAST(input_protein_kg AS SIGNED)
+                      FROM wp_mf_3_dp_curd_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                    UNION ALL SELECT entry_date, 9, -CAST(input_culture_kg AS SIGNED)
+                      FROM wp_mf_3_dp_curd_production WHERE $stk_loc AND entry_date BETWEEN %s AND %s
+                ) movements GROUP BY entry_date, product_id
+            ", $from,$to, $from,$to, $from,$to, $from,$to, $from,$to,
+               $from,$to, $from,$to, $from,$to, $from,$to, $from,$to,
+               $from,$to, $from,$to, $from,$to, $from,$to, $from,$to,
+               $from,$to, $from,$to, $from,$to, $from,$to,
+               $from,$to, $from,$to, $from,$to, $from,$to, $from,$to);
+            $stk_rows = $db->get_results($stk_q, ARRAY_A);
+            $this->check_db('cash_stock.stock_movements');
+
+            // Sales also reduce stock
+            $stk_loc_sales = $loc ? $db->prepare('location_id = %d', $loc) : "location_id IN (SELECT id FROM wp_mf_3_dp_locations WHERE code != 'TEST')";
+            $sales_stk = $db->get_results($db->prepare(
+                "SELECT entry_date, product_id, SUM(quantity_kg) AS qty
+                   FROM wp_mf_3_dp_sales WHERE $stk_loc_sales AND entry_date BETWEEN %s AND %s
+                  GROUP BY entry_date, product_id",
+                $from, $to), ARRAY_A);
+            $this->check_db('cash_stock.stock_sales');
+
+            // Build daily stock movements map
+            $daily_stk = []; // date => [product_id => net_movement]
+            foreach ($stk_rows ?: [] as $sr) {
+                $daily_stk[$sr['entry_date']][$sr['product_id']] =
+                    ($daily_stk[$sr['entry_date']][$sr['product_id']] ?? 0) + (int)$sr['qty'];
+            }
+            foreach ($sales_stk ?: [] as $sr) {
+                $daily_stk[$sr['entry_date']][$sr['product_id']] =
+                    ($daily_stk[$sr['entry_date']][$sr['product_id']] ?? 0) - (int)$sr['qty'];
+            }
+
+            // Estimated rates
+            $rate_rows = $db->get_results("SELECT product_id, rate FROM wp_mf_3_dp_estimated_rates", ARRAY_A);
+            $this->check_db('cash_stock.rates');
+            $rates = [];
+            foreach ($rate_rows ?: [] as $rr) $rates[(int)$rr['product_id']] = (float)$rr['rate'];
+
+            // Product groups for columns
+            // skim_milk=2, curd=10, cream=3, ghee=5, butter=4, ff_milk=1, smp_cul_pro=7+8+9
+            $prod_cols = [
+                'skim_milk' => [2],
+                'curd'      => [10],
+                'cream'     => [3],
+                'ghee'      => [5],
+                'butter'    => [4],
+                'ff_milk'   => [1],
+                'smp_cul_pro' => [7, 8, 9],
+            ];
+
+            // ── 3. Walk day by day, compute cumulative stock + cash ──
+            $running_stock = []; // product_id => cumulative qty
+            $cash = 0;
+            $rows = [];
+
+            for ($ts = strtotime($from); $ts <= strtotime($to); $ts += 86400) {
+                $d = date('Y-m-d', $ts);
+
+                // Update running stock
+                foreach ($daily_stk[$d] ?? [] as $pid => $mv) {
+                    $running_stock[$pid] = ($running_stock[$pid] ?? 0) + $mv;
+                }
+
+                // Cash flow for this date
+                $cf = $cash_map[$d] ?? ['sales' => 0, 'purchases' => 0, 'payments' => 0];
+                $beg_cash = round($cash, 2);
+                $end_cash = round($beg_cash + $cf['sales'] - $cf['payments'], 2);
+
+                // Stock values per column
+                $stock_vals = [];
+                $total_stock = 0;
+                foreach ($prod_cols as $col => $pids) {
+                    $val = 0;
+                    foreach ($pids as $pid) {
+                        $qty = $running_stock[$pid] ?? 0;
+                        $val += $qty * ($rates[$pid] ?? 0);
+                    }
+                    $val = round($val, 2);
+                    $stock_vals[$col] = $val;
+                    $total_stock += $val;
+                }
+                $total_stock = round($total_stock, 2);
+
+                $row = [
+                    'date'           => $d,
+                    'beginning_cash' => $beg_cash,
+                    'sales'          => round($cf['sales'], 2),
+                    'purchases'      => round($cf['purchases'], 2),
+                    'payments'       => round($cf['payments'], 2),
+                    'end_cash'       => $end_cash,
+                ];
+                foreach ($stock_vals as $col => $val) $row[$col] = $val;
+                $row['total_stock'] = $total_stock;
+                $row['cash_plus_stock'] = round($end_cash + $total_stock, 2);
+
+                $rows[] = $row;
+                $cash = $end_cash;
+            }
+
+            // Reverse for date DESC display
+            $rows = array_reverse($rows);
+
+            return $this->ok([
+                'from' => $from,
+                'to'   => $to,
+                'rows' => $rows,
+            ]);
+        } catch (\Exception $e) { return $this->exc('get_cash_stock_report', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
     // SALES LEDGER (flat transaction list with customer filter)
     // ════════════════════════════════════════════════════
 
     public function get_sales_ledger( WP_REST_Request $r ): WP_REST_Response {
-        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        $loc = (int) ($r->get_param('location_id') ?? 0);
+        if ($loc) {
+            if ($e = $this->check_location_access($this->uid(), $loc)) return $e;
+        }
         try {
             $db   = $this->db();
-            $loc  = (int) $r['location_id'];
             $from = $r->get_param('from') ?: date('Y-m-d', strtotime('-29 days'));
             $to   = $r->get_param('to')   ?: date('Y-m-d');
             $cid  = (int) ($r->get_param('customer_id') ?? 0);
 
+            $loc_cond  = $loc ? $db->prepare(' AND s.location_id = %d', $loc) : '';
             $cust_cond = $cid ? $db->prepare(' AND s.customer_id = %d', $cid) : '';
 
             $rows = $db->get_results($db->prepare(
                 "SELECT s.id, s.entry_date, c.name AS customer_name,
                         p.name AS product_name, p.unit,
                         s.quantity_kg, s.rate,
-                        ROUND(s.quantity_kg * s.rate, 2) AS total
+                        ROUND(s.quantity_kg * s.rate, 2) AS total,
+                        l.name AS location_name
                    FROM wp_mf_3_dp_sales s
                    JOIN wp_mf_3_dp_customers c ON c.id = s.customer_id
                    JOIN wp_mf_3_dp_products p ON p.id = s.product_id
-                  WHERE s.location_id = %d
-                    AND s.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations l ON l.id = s.location_id
+                  WHERE s.entry_date BETWEEN %s AND %s
+                    $loc_cond
                     $cust_cond
                   ORDER BY s.entry_date DESC, c.name, p.name",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('get_sales_ledger');
 
@@ -2935,9 +3439,9 @@ class Dairy_Production_API {
                 "SELECT DISTINCT c.id, c.name
                    FROM wp_mf_3_dp_sales s
                    JOIN wp_mf_3_dp_customers c ON c.id = s.customer_id
-                  WHERE s.location_id = %d AND s.entry_date BETWEEN %s AND %s
+                  WHERE s.entry_date BETWEEN %s AND %s $loc_cond
                   ORDER BY c.name",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('get_sales_ledger.customers');
 
@@ -3011,22 +3515,36 @@ class Dairy_Production_API {
     // ════════════════════════════════════════════════════
 
     public function get_production_transactions( WP_REST_Request $r ): WP_REST_Response {
-        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        $loc = (int) ($r->get_param('location_id') ?? 0);
+        if ($loc) {
+            if ($e = $this->check_location_access($this->uid(), $loc)) return $e;
+        }
         try {
             $db   = $this->db();
-            $loc  = (int) $r['location_id'];
-            // Optional single-date filter for Production page inline entries
+            // Date range: from/to params, or single entry_date, or default last N days
+            $p_from = $r->get_param('from');
+            $p_to   = $r->get_param('to');
             $single_date = $r->get_param('entry_date');
-            if ($single_date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $single_date)) {
+            if ($p_from && $p_to && preg_match('/^\d{4}-\d{2}-\d{2}$/', $p_from) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $p_to)) {
+                $from = $p_from;
+                $to   = $p_to;
+            } elseif ($single_date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $single_date)) {
                 $from = $single_date;
                 $to   = $single_date;
-                $days = 1;
             } else {
                 $days = (int) get_option('dairy_transaction_days', 7);
                 $days = max(1, min(90, $days));
                 $from = date('Y-m-d', strtotime("-{$days} days"));
                 $to   = date('Y-m-d');
             }
+            $loc_cond_m = $loc ? $db->prepare(' AND m.location_id = %d', $loc) : '';
+            $loc_cond_c = $loc ? $db->prepare(' AND c.location_id = %d', $loc) : '';
+            $loc_cond_b = $loc ? $db->prepare(' AND b.location_id = %d', $loc) : '';
+            $loc_cond_d = $loc ? $db->prepare(' AND d.location_id = %d', $loc) : '';
+            $loc_cond_i = $loc ? $db->prepare(' AND i.location_id = %d', $loc) : '';
+            $loc_cond_pp = $loc ? $db->prepare(' AND pp.location_id = %d', $loc) : '';
+            $loc_cond_cp = $loc ? $db->prepare(' AND cp.location_id = %d', $loc) : '';
+            $loc_cond_ms = $loc ? $db->prepare(' AND ms.location_id = %d', $loc) : '';
             $this->log("prod_tx START: loc=$loc days=$days from=$from to=$to");
 
             // ── FF Milk Purchase & Processing ──────────────────────
@@ -3036,12 +3554,14 @@ class Dairy_Production_API {
                         m.input_ff_milk_kg, m.input_snf, m.input_fat, m.input_rate,
                         m.input_ff_milk_used_kg,
                         m.output_skim_milk_kg, m.output_skim_snf,
-                        m.output_cream_kg, m.output_cream_fat
+                        m.output_cream_kg, m.output_cream_fat,
+                        lm.name AS location_name
                    FROM wp_mf_3_dp_milk_cream_production m
                    LEFT JOIN wp_mf_3_dp_vendors v ON v.id = m.vendor_id
-                  WHERE m.location_id = %d AND m.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations lm ON lm.id = m.location_id
+                  WHERE m.entry_date BETWEEN %s AND %s $loc_cond_m
                   ORDER BY m.entry_date DESC, m.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.milk');
             $this->log('prod_tx.milk count=' . count($milk ?? []));
@@ -3052,12 +3572,14 @@ class Dairy_Production_API {
                         c.vendor_id, v.name AS vendor_name,
                         c.input_cream_kg, c.input_fat, c.input_rate,
                         c.input_cream_used_kg,
-                        c.output_butter_kg, c.output_butter_fat, c.output_ghee_kg
+                        c.output_butter_kg, c.output_butter_fat, c.output_ghee_kg,
+                        lc.name AS location_name
                    FROM wp_mf_3_dp_cream_butter_ghee c
                    LEFT JOIN wp_mf_3_dp_vendors v ON v.id = c.vendor_id
-                  WHERE c.location_id = %d AND c.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations lc ON lc.id = c.location_id
+                  WHERE c.entry_date BETWEEN %s AND %s $loc_cond_c
                   ORDER BY c.entry_date DESC, c.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.cream');
             $this->log('prod_tx.cream count=' . count($cream ?? []));
@@ -3067,26 +3589,30 @@ class Dairy_Production_API {
                 "SELECT b.id, b.entry_date, b.created_at, b.created_by,
                         b.vendor_id, v.name AS vendor_name,
                         b.input_butter_kg, b.input_fat, b.input_rate,
-                        b.input_butter_used_kg, b.output_ghee_kg
+                        b.input_butter_used_kg, b.output_ghee_kg,
+                        lb.name AS location_name
                    FROM wp_mf_3_dp_butter_ghee b
                    LEFT JOIN wp_mf_3_dp_vendors v ON v.id = b.vendor_id
-                  WHERE b.location_id = %d AND b.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations lb ON lb.id = b.location_id
+                  WHERE b.entry_date BETWEEN %s AND %s $loc_cond_b
                   ORDER BY b.entry_date DESC, b.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.butter');
             $this->log('prod_tx.butter count=' . count($butter ?? []));
 
             // ── Dahi Production ────────────────────────────────────
             $dahi = $db->get_results($db->prepare(
-                "SELECT id, entry_date, created_at, created_by,
-                        input_smp_bags, input_culture_kg, input_protein_kg,
-                        input_skim_milk_kg, input_container_count,
-                        input_seal_count, output_container_count
-                   FROM wp_mf_3_dp_dahi_production
-                  WHERE location_id = %d AND entry_date BETWEEN %s AND %s
-                  ORDER BY entry_date DESC, created_at DESC",
-                $loc, $from, $to
+                "SELECT d.id, d.entry_date, d.created_at, d.created_by,
+                        d.input_smp_bags, d.input_culture_kg, d.input_protein_kg,
+                        d.input_skim_milk_kg, d.input_container_count,
+                        d.input_seal_count, d.output_container_count,
+                        ld.name AS location_name
+                   FROM wp_mf_3_dp_dahi_production d
+                   JOIN wp_mf_3_dp_locations ld ON ld.id = d.location_id
+                  WHERE d.entry_date BETWEEN %s AND %s $loc_cond_d
+                  ORDER BY d.entry_date DESC, d.created_at DESC",
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.dahi');
             $this->log('prod_tx.dahi count=' . count($dahi ?? []));
@@ -3095,12 +3621,14 @@ class Dairy_Production_API {
             $ingredients = $db->get_results($db->prepare(
                 "SELECT i.id, i.entry_date, i.created_at, i.created_by,
                         i.product_id, p.name AS product_name, i.quantity,
-                        IFNULL(i.rate, 0) AS rate
+                        IFNULL(i.rate, 0) AS rate,
+                        li.name AS location_name
                    FROM wp_mf_3_dp_ingredient_purchase i
                    JOIN wp_mf_3_dp_products p ON p.id = i.product_id
-                  WHERE i.location_id = %d AND i.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations li ON li.id = i.location_id
+                  WHERE i.entry_date BETWEEN %s AND %s $loc_cond_i
                   ORDER BY i.entry_date DESC, i.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.ingredients');
             $this->log('prod_tx.ingredients count=' . count($ingredients ?? []));
@@ -3110,9 +3638,7 @@ class Dairy_Production_API {
             else {
                 // Log raw count directly from DB to isolate query vs location issue
                 $raw_count = $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_ingredient_purchase");
-                $loc_count = $db->get_var($db->prepare("SELECT COUNT(*) FROM wp_mf_3_dp_ingredient_purchase WHERE location_id=%d", $loc));
-                $date_count = $db->get_var($db->prepare("SELECT COUNT(*) FROM wp_mf_3_dp_ingredient_purchase WHERE location_id=%d AND entry_date BETWEEN %s AND %s", $loc, $from, $to));
-                $this->log("prod_tx.ingredients diagnostic: total=$raw_count loc_match=$loc_count date_match=$date_count");
+                $this->log("prod_tx.ingredients diagnostic: total=$raw_count loc=$loc");
             }
 
             // ── Pouch Production ─────────────────────────────────
@@ -3120,11 +3646,13 @@ class Dairy_Production_API {
                 "SELECT pp.id, pp.entry_date, pp.created_at, pp.created_by,
                         pp.output_cream_kg, pp.output_cream_fat,
                         COALESCE((SELECT SUM(mu.ff_milk_kg) FROM wp_mf_3_dp_milk_usage mu
-                                  WHERE mu.flow_type='pouch' AND mu.flow_id=pp.id), 0) AS total_ff_milk_kg
+                                  WHERE mu.flow_type='" . self::FLOW_POUCH . "' AND mu.flow_id=pp.id), 0) AS total_ff_milk_kg,
+                        lpp.name AS location_name
                    FROM wp_mf_3_dp_pouch_production pp
-                  WHERE pp.location_id = %d AND pp.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations lpp ON lpp.id = pp.location_id
+                  WHERE pp.entry_date BETWEEN %s AND %s $loc_cond_pp
                   ORDER BY pp.entry_date DESC, pp.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.pouch');
 
@@ -3133,22 +3661,26 @@ class Dairy_Production_API {
                 "SELECT cp.id, cp.entry_date, cp.created_at, cp.created_by,
                         cp.output_cream_kg, cp.output_cream_fat, cp.output_curd_matka,
                         COALESCE((SELECT SUM(mu.ff_milk_kg) FROM wp_mf_3_dp_milk_usage mu
-                                  WHERE mu.flow_type='curd' AND mu.flow_id=cp.id), 0) AS total_ff_milk_kg
+                                  WHERE mu.flow_type='" . self::FLOW_CURD . "' AND mu.flow_id=cp.id), 0) AS total_ff_milk_kg,
+                        lcp.name AS location_name
                    FROM wp_mf_3_dp_curd_production cp
-                  WHERE cp.location_id = %d AND cp.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations lcp ON lcp.id = cp.location_id
+                  WHERE cp.entry_date BETWEEN %s AND %s $loc_cond_cp
                   ORDER BY cp.entry_date DESC, cp.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.curd');
 
             // ── Madhusudan Sale ──────────────────────────────────────
             $madhusudan = $db->get_results($db->prepare(
                 "SELECT ms.id, ms.entry_date, ms.created_at, ms.created_by,
-                        ms.total_ff_milk_kg, ms.sale_rate
+                        ms.total_ff_milk_kg, ms.sale_rate,
+                        lms.name AS location_name
                    FROM wp_mf_3_dp_madhusudan_sale ms
-                  WHERE ms.location_id = %d AND ms.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations lms ON lms.id = ms.location_id
+                  WHERE ms.entry_date BETWEEN %s AND %s $loc_cond_ms
                   ORDER BY ms.entry_date DESC, ms.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.madhusudan');
 
@@ -3243,28 +3775,33 @@ class Dairy_Production_API {
     // ════════════════════════════════════════════════════
 
     public function get_sales_transactions( WP_REST_Request $r ): WP_REST_Response {
-        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        $loc = (int) ($r->get_param('location_id') ?? 0);
+        if ($loc) {
+            if ($e = $this->check_location_access($this->uid(), $loc)) return $e;
+        }
         try {
             $db   = $this->db();
-            $loc  = (int) $r['location_id'];
             $days = (int) get_option('dairy_transaction_days', 7);
             $days = max(1, min(90, $days));
             $from = date('Y-m-d', strtotime("-{$days} days"));
             $to   = date('Y-m-d');
+            $loc_cond = $loc ? $db->prepare(' AND s.location_id = %d', $loc) : '';
 
             $rows = $db->get_results($db->prepare(
                 "SELECT s.id, s.entry_date, s.quantity_kg, s.rate,
                         ROUND(s.quantity_kg * s.rate, 2) AS total,
                         s.created_at, s.created_by,
                         p.name AS product_name,
-                        c.name AS customer_name
+                        c.name AS customer_name,
+                        l.name AS location_name
                    FROM wp_mf_3_dp_sales s
                    JOIN wp_mf_3_dp_products  p ON p.id = s.product_id
                    JOIN wp_mf_3_dp_customers c ON c.id = s.customer_id
-                  WHERE s.location_id = %d
-                    AND s.entry_date BETWEEN %s AND %s
+                   JOIN wp_mf_3_dp_locations l ON l.id = s.location_id
+                  WHERE s.entry_date BETWEEN %s AND %s
+                    $loc_cond
                   ORDER BY s.entry_date DESC, s.created_at DESC",
-                $loc, $from, $to
+                $from, $to
             ), ARRAY_A);
             $this->check_db('sales_tx');
 
@@ -3293,10 +3830,12 @@ class Dairy_Production_API {
         if ($e = $this->check_finance_access($this->uid())) return $e;
         try {
             $db = $this->db();
+            $filter_loc = (int) ($r->get_param('location_id') ?? 0);
+            $loc_cond = $filter_loc ? $db->prepare(' AND location_id = %d', $filter_loc) : '';
 
-            // 1. Sales total — all time, all locations
+            // 1. Sales total — all time, optionally filtered by location
             $sales_total = (float) $db->get_var(
-                "SELECT COALESCE(SUM(quantity_kg * rate), 0) FROM wp_mf_3_dp_sales"
+                "SELECT COALESCE(SUM(quantity_kg * rate), 0) FROM wp_mf_3_dp_sales WHERE 1=1 $loc_cond"
             );
             $this->check_db('funds_report.sales');
 
@@ -3307,8 +3846,13 @@ class Dairy_Production_API {
             $rates = [];
             foreach ($rates_rows as $rw) $rates[(int)$rw['product_id']] = (float)$rw['rate'];
 
-            $locations = $db->get_results(
-                "SELECT id FROM wp_mf_3_dp_locations WHERE is_active=1", ARRAY_A);
+            if ($filter_loc) {
+                $locations = $db->get_results($db->prepare(
+                    "SELECT id FROM wp_mf_3_dp_locations WHERE is_active=1 AND id=%d", $filter_loc), ARRAY_A);
+            } else {
+                $locations = $db->get_results(
+                    "SELECT id FROM wp_mf_3_dp_locations WHERE is_active=1", ARRAY_A);
+            }
             $this->check_db('funds_report.locations');
 
             $products = $db->get_results(
@@ -3330,7 +3874,8 @@ class Dairy_Production_API {
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
                     $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
-                    $loc,$from,$to, $loc,$from,$to
+                    $loc,$from,$to, $loc,$from,$to, $loc,$from,$to, $loc,$from,$to,
+                    $loc,$from,$to, $loc,$from,$to, $loc,$from,$to
                 ), ARRAY_A);
                 $this->check_db("funds_report.stock_loc_$loc");
 
@@ -3367,15 +3912,15 @@ class Dairy_Production_API {
                 SELECT COALESCE(SUM(amount), 0) FROM (
                     SELECT ROUND(input_ff_milk_kg * input_rate, 2) AS amount
                       FROM wp_mf_3_dp_milk_cream_production
-                     WHERE vendor_id IS NOT NULL AND input_ff_milk_kg > 0
+                     WHERE vendor_id IS NOT NULL AND input_ff_milk_kg > 0 $loc_cond
                     UNION ALL
                     SELECT ROUND(input_cream_kg * input_rate, 2) AS amount
                       FROM wp_mf_3_dp_cream_butter_ghee
-                     WHERE vendor_id IS NOT NULL AND input_cream_kg > 0
+                     WHERE vendor_id IS NOT NULL AND input_cream_kg > 0 $loc_cond
                     UNION ALL
                     SELECT ROUND(input_butter_kg * input_rate, 2) AS amount
                       FROM wp_mf_3_dp_butter_ghee
-                     WHERE vendor_id IS NOT NULL AND input_butter_kg > 0
+                     WHERE vendor_id IS NOT NULL AND input_butter_kg > 0 $loc_cond
                 ) AS all_purchases
             ");
             $this->check_db('funds_report.purchases');
@@ -3483,6 +4028,21 @@ class Dairy_Production_API {
             -- Curd produced (+)
             UNION ALL SELECT entry_date, 10, CAST(output_curd_matka AS SIGNED)
               FROM wp_mf_3_dp_curd_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Matka purchased (+)
+            UNION ALL SELECT entry_date, 11, CAST(quantity AS SIGNED)
+              FROM wp_mf_3_dp_ingredient_purchase WHERE product_id=11 AND location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Matka consumed by Curd production (-)
+            UNION ALL SELECT entry_date, 11, -CAST(output_curd_matka AS SIGNED)
+              FROM wp_mf_3_dp_curd_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- SMP consumed by Curd production (-)
+            UNION ALL SELECT entry_date, 7, -CAST(input_smp_bags AS SIGNED)
+              FROM wp_mf_3_dp_curd_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Protein consumed by Curd production (-)
+            UNION ALL SELECT entry_date, 8, -CAST(input_protein_kg AS SIGNED)
+              FROM wp_mf_3_dp_curd_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
+            -- Culture consumed by Curd production (-)
+            UNION ALL SELECT entry_date, 9, -CAST(input_culture_kg AS SIGNED)
+              FROM wp_mf_3_dp_curd_production WHERE location_id=%d AND entry_date BETWEEN %s AND %s
         ";
     }
 
@@ -3524,25 +4084,25 @@ class Dairy_Production_API {
                 $consumed = $db->get_results($db->prepare(
                     "SELECT mu.vendor_id, COALESCE(SUM(mu.ff_milk_kg),0) AS consumed
                        FROM wp_mf_3_dp_milk_usage mu
-                       JOIN wp_mf_3_dp_milk_cream_production m ON m.id = mu.flow_id AND mu.flow_type = 'milk_cream'
+                       JOIN wp_mf_3_dp_milk_cream_production m ON m.id = mu.flow_id AND mu.flow_type = '" . self::FLOW_FF_MILK . "'
                       WHERE mu.location_id=%d AND m.entry_date <= %s
                       GROUP BY mu.vendor_id
                      UNION ALL
                      SELECT mu.vendor_id, COALESCE(SUM(mu.ff_milk_kg),0) AS consumed
                        FROM wp_mf_3_dp_milk_usage mu
-                       JOIN wp_mf_3_dp_pouch_production pp ON pp.id = mu.flow_id AND mu.flow_type = 'pouch'
+                       JOIN wp_mf_3_dp_pouch_production pp ON pp.id = mu.flow_id AND mu.flow_type = '" . self::FLOW_POUCH . "'
                       WHERE mu.location_id=%d AND pp.entry_date <= %s
                       GROUP BY mu.vendor_id
                      UNION ALL
                      SELECT mu.vendor_id, COALESCE(SUM(mu.ff_milk_kg),0) AS consumed
                        FROM wp_mf_3_dp_milk_usage mu
-                       JOIN wp_mf_3_dp_madhusudan_sale ms ON ms.id = mu.flow_id AND mu.flow_type = 'madhusudan'
+                       JOIN wp_mf_3_dp_madhusudan_sale ms ON ms.id = mu.flow_id AND mu.flow_type = '" . self::FLOW_MADHUSUDAN . "'
                       WHERE mu.location_id=%d AND ms.entry_date <= %s
                       GROUP BY mu.vendor_id
                      UNION ALL
                      SELECT mu.vendor_id, COALESCE(SUM(mu.ff_milk_kg),0) AS consumed
                        FROM wp_mf_3_dp_milk_usage mu
-                       JOIN wp_mf_3_dp_curd_production cp ON cp.id = mu.flow_id AND mu.flow_type = 'curd'
+                       JOIN wp_mf_3_dp_curd_production cp ON cp.id = mu.flow_id AND mu.flow_type = '" . self::FLOW_CURD . "'
                       WHERE mu.location_id=%d AND cp.entry_date <= %s
                       GROUP BY mu.vendor_id",
                     $loc, $as_of, $loc, $as_of, $loc, $as_of, $loc, $as_of), ARRAY_A);
@@ -3673,7 +4233,7 @@ class Dairy_Production_API {
                     "SELECT mu.vendor_id, v.name AS vendor_name, mu.ff_milk_kg
                        FROM wp_mf_3_dp_milk_usage mu
                        JOIN wp_mf_3_dp_vendors v ON v.id = mu.vendor_id
-                      WHERE mu.flow_type='pouch' AND mu.flow_id=%d", $pid), ARRAY_A);
+                      WHERE mu.flow_type='" . self::FLOW_POUCH . "' AND mu.flow_id=%d", $pid), ARRAY_A);
             }
             unset($row);
             return $this->ok($rows);
@@ -3745,7 +4305,7 @@ class Dairy_Production_API {
             // Insert milk_usage rows
             foreach ($milk_usage as $mu) {
                 $mu_data = [
-                    'flow_type'   => 'pouch',
+                    'flow_type'   => self::FLOW_POUCH,
                     'flow_id'     => $pp_id,
                     'location_id' => $loc,
                     'entry_date'  => $r['entry_date'],
@@ -3895,7 +4455,7 @@ class Dairy_Production_API {
                 // Get milk usage for cost calculation
                 $usages = $db->get_results($db->prepare(
                     "SELECT vendor_id, ff_milk_kg FROM wp_mf_3_dp_milk_usage
-                      WHERE flow_type='pouch' AND flow_id=%d AND location_id=%d",
+                      WHERE flow_type='" . self::FLOW_POUCH . "' AND flow_id=%d AND location_id=%d",
                     $pp_id, $loc), ARRAY_A);
                 $this->check_db('pouch_pnl.usage');
 
@@ -3944,6 +4504,269 @@ class Dairy_Production_API {
 
     private function db(): wpdb  { global $wpdb; return $wpdb; }
     private function uid(): int  { return get_current_user_id(); }
+    // ════════════════════════════════════════════════════
+    // REPORT MENU CONFIG
+    // ════════════════════════════════════════════════════
+
+    public function get_report_menu(): WP_REST_Response {
+        try {
+            $rows = $this->db()->get_results(
+                "SELECT `key`, label, subtitle, sort_order, permission
+                   FROM wp_mf_3_dp_report_menu
+                  WHERE is_active = 1
+                  ORDER BY sort_order, label",
+                ARRAY_A);
+            $this->check_db('get_report_menu');
+            return $this->ok($rows ?? []);
+        } catch (\Exception $e) { return $this->exc('get_report_menu', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
+    // PROFITABILITY REPORT  (finance)
+    // ════════════════════════════════════════════════════
+
+    public function get_profitability_report( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db   = $this->db();
+            $from = $r->get_param('from') ?: date('Y-m-d', strtotime('-29 days'));
+            $to   = $r->get_param('to')   ?: date('Y-m-d');
+            $loc  = (int) ($r->get_param('location_id') ?? 0);
+            $flow = $r->get_param('flow') ?: '';
+
+            $loc_cond  = $loc ? $db->prepare(' AND t.location_id = %d', $loc) : '';
+            $test_cond = $loc ? '' : " AND l.code != 'TEST'";
+            $join_loc  = ' JOIN wp_mf_3_dp_locations l ON l.id = t.location_id';
+
+            // ── Estimated rates ──
+            $rate_rows = $db->get_results("SELECT product_id, rate FROM wp_mf_3_dp_estimated_rates", ARRAY_A);
+            $est = [];
+            foreach ($rate_rows ?: [] as $rr) $est[(int)$rr['product_id']] = (float)$rr['rate'];
+
+            // ── Avg FF milk rate per date+location (for curd & madhusudan cost) ──
+            $avg_ff = [];
+            $avg_q = $db->get_results($db->prepare(
+                "SELECT entry_date, location_id,
+                        ROUND(SUM(input_ff_milk_kg * input_rate) / NULLIF(SUM(input_ff_milk_kg), 0), 2) AS avg_rate
+                   FROM wp_mf_3_dp_milk_cream_production
+                  WHERE entry_date BETWEEN %s AND %s AND input_ff_milk_kg > 0
+                  GROUP BY entry_date, location_id", $from, $to), ARRAY_A);
+            foreach ($avg_q ?: [] as $aq) {
+                $avg_ff[$aq['entry_date'] . '|' . $aq['location_id']] = (float)$aq['avg_rate'];
+            }
+            // Fallback: global avg FF milk rate
+            $global_avg_ff = $est[1] ?? 0;
+            $get_ff_rate = function($date, $lid) use (&$avg_ff, $global_avg_ff) {
+                return $avg_ff[$date . '|' . $lid] ?? $global_avg_ff;
+            };
+
+            $rows = [];
+
+            // ── Flow: FF Milk → Skim + Cream ──
+            // Processing rows have input_ff_milk_used_kg > 0, outputs > 0, but input_rate = 0.
+            // Purchase rows have input_ff_milk_kg > 0, input_rate > 0, but outputs = 0.
+            // Use input_ff_milk_used_kg for quantity, and avg purchase rate for cost.
+            if (!$flow || $flow === 'ff_milk') {
+                $q = $db->get_results($db->prepare(
+                    "SELECT t.entry_date AS dt, l.name AS loc_name, t.location_id AS lid,
+                            SUM(t.input_ff_milk_used_kg) AS ff_kg,
+                            SUM(t.output_skim_milk_kg) AS skim_kg,
+                            SUM(t.output_cream_kg) AS cream_kg
+                       FROM wp_mf_3_dp_milk_cream_production t $join_loc
+                      WHERE t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                        AND t.input_ff_milk_used_kg > 0
+                      GROUP BY t.entry_date, t.location_id
+                      ORDER BY t.entry_date DESC, l.name",
+                    $from, $to), ARRAY_A);
+                $this->check_db('profit.ff_milk');
+                foreach ($q ?: [] as $r2) {
+                    $ff = (float)$r2['ff_kg'];
+                    $skim = (float)$r2['skim_kg']; $cream = (float)$r2['cream_kg'];
+                    $rate = $get_ff_rate($r2['dt'], $r2['lid']);
+                    $cost = round($ff * $rate, 2);
+                    $value = $skim * ($est[2] ?? 0) + $cream * ($est[3] ?? 0);
+                    $profit = round($value - $cost, 2);
+                    $rows[] = [
+                        'date' => $r2['dt'], 'location_name' => $r2['loc_name'],
+                        'flow' => 'ff_milk', 'flow_label' => 'FF Milk → Skim+Cream',
+                        'inputs'  => 'FF Milk: ' . (int)$ff . ' KG (₹' . $this->d2($rate) . ')',
+                        'outputs' => 'Skim: ' . (int)$skim . ' KG (₹' . $this->d2($est[2] ?? 0) . '), Cream: ' . (int)$cream . ' KG (₹' . $this->d2($est[3] ?? 0) . ')',
+                        'cost' => $cost, 'value' => round($value, 2),
+                        'profit' => $profit,
+                        'profit_pct' => $cost > 0 ? round(($profit / $cost) * 100, 1) : 0,
+                    ];
+                }
+            }
+
+            // ── Flow: Cream → Butter + Ghee ──
+            // Same pattern: processing rows have input_cream_used_kg > 0 with outputs,
+            // purchase rows have input_cream_kg > 0 with input_rate but no outputs.
+            if (!$flow || $flow === 'cream') {
+                // Avg cream purchase rate per date+location
+                $avg_cr_q = $db->get_results($db->prepare(
+                    "SELECT entry_date, location_id,
+                            ROUND(SUM(input_cream_kg * input_rate) / NULLIF(SUM(input_cream_kg), 0), 2) AS avg_rate
+                       FROM wp_mf_3_dp_cream_butter_ghee
+                      WHERE entry_date BETWEEN %s AND %s AND input_cream_kg > 0 AND input_rate > 0
+                      GROUP BY entry_date, location_id", $from, $to), ARRAY_A);
+                $avg_cr = [];
+                foreach ($avg_cr_q ?: [] as $aq) $avg_cr[$aq['entry_date'].'|'.$aq['location_id']] = (float)$aq['avg_rate'];
+
+                $q = $db->get_results($db->prepare(
+                    "SELECT t.entry_date AS dt, l.name AS loc_name, t.location_id AS lid,
+                            SUM(t.input_cream_used_kg) AS cream_kg,
+                            SUM(t.output_butter_kg) AS butter_kg,
+                            SUM(t.output_ghee_kg) AS ghee_kg
+                       FROM wp_mf_3_dp_cream_butter_ghee t $join_loc
+                      WHERE t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                        AND t.input_cream_used_kg > 0
+                      GROUP BY t.entry_date, t.location_id
+                      ORDER BY t.entry_date DESC, l.name",
+                    $from, $to), ARRAY_A);
+                $this->check_db('profit.cream');
+                foreach ($q ?: [] as $r2) {
+                    $cr = (float)$r2['cream_kg'];
+                    $butter = (float)$r2['butter_kg']; $ghee = (float)$r2['ghee_kg'];
+                    $rate = $avg_cr[$r2['dt'].'|'.$r2['lid']] ?? ($est[3] ?? 0);
+                    $cost = round($cr * $rate, 2);
+                    $value = $butter * ($est[4] ?? 0) + $ghee * ($est[5] ?? 0);
+                    $profit = round($value - $cost, 2);
+                    $rows[] = [
+                        'date' => $r2['dt'], 'location_name' => $r2['loc_name'],
+                        'flow' => 'cream', 'flow_label' => 'Cream → Butter+Ghee',
+                        'inputs'  => 'Cream: ' . (int)$cr . ' KG (₹' . $this->d2($rate) . ')',
+                        'outputs' => 'Butter: ' . (int)$butter . ' KG (₹' . $this->d2($est[4] ?? 0) . '), Ghee: ' . (int)$ghee . ' KG (₹' . $this->d2($est[5] ?? 0) . ')',
+                        'cost' => $cost, 'value' => round($value, 2),
+                        'profit' => $profit,
+                        'profit_pct' => $cost > 0 ? round(($profit / $cost) * 100, 1) : 0,
+                    ];
+                }
+            }
+
+            // ── Flow: Butter → Ghee ──
+            if (!$flow || $flow === 'butter') {
+                // Avg butter purchase rate per date+location
+                $avg_bt_q = $db->get_results($db->prepare(
+                    "SELECT entry_date, location_id,
+                            ROUND(SUM(input_butter_kg * input_rate) / NULLIF(SUM(input_butter_kg), 0), 2) AS avg_rate
+                       FROM wp_mf_3_dp_butter_ghee
+                      WHERE entry_date BETWEEN %s AND %s AND input_butter_kg > 0 AND input_rate > 0
+                      GROUP BY entry_date, location_id", $from, $to), ARRAY_A);
+                $avg_bt = [];
+                foreach ($avg_bt_q ?: [] as $aq) $avg_bt[$aq['entry_date'].'|'.$aq['location_id']] = (float)$aq['avg_rate'];
+
+                $q = $db->get_results($db->prepare(
+                    "SELECT t.entry_date AS dt, l.name AS loc_name, t.location_id AS lid,
+                            SUM(t.input_butter_used_kg) AS butter_kg,
+                            SUM(t.output_ghee_kg) AS ghee_kg
+                       FROM wp_mf_3_dp_butter_ghee t $join_loc
+                      WHERE t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                        AND t.input_butter_used_kg > 0
+                      GROUP BY t.entry_date, t.location_id
+                      ORDER BY t.entry_date DESC, l.name",
+                    $from, $to), ARRAY_A);
+                $this->check_db('profit.butter');
+                foreach ($q ?: [] as $r2) {
+                    $bt = (float)$r2['butter_kg'];
+                    $ghee = (float)$r2['ghee_kg'];
+                    $rate = $avg_bt[$r2['dt'].'|'.$r2['lid']] ?? ($est[4] ?? 0);
+                    $cost = round($bt * $rate, 2);
+                    $value = $ghee * ($est[5] ?? 0);
+                    $profit = round($value - $cost, 2);
+                    $rows[] = [
+                        'date' => $r2['dt'], 'location_name' => $r2['loc_name'],
+                        'flow' => 'butter', 'flow_label' => 'Butter → Ghee',
+                        'inputs'  => 'Butter: ' . (int)$bt . ' KG (₹' . $this->d2($rate) . ')',
+                        'outputs' => 'Ghee: ' . (int)$ghee . ' KG (₹' . $this->d2($est[5] ?? 0) . ')',
+                        'cost' => $cost, 'value' => round($value, 2),
+                        'profit' => $profit,
+                        'profit_pct' => $cost > 0 ? round(($profit / $cost) * 100, 1) : 0,
+                    ];
+                }
+            }
+
+            // ── Flow: FF Milk → Cream + Curd ──
+            if (!$flow || $flow === 'curd') {
+                $q = $db->get_results($db->prepare(
+                    "SELECT t.entry_date AS dt, l.name AS loc_name, t.location_id AS lid,
+                            SUM(t.output_cream_kg) AS cream_kg,
+                            SUM(t.output_curd_matka) AS curd_matka,
+                            SUM(t.input_smp_bags) AS smp_bags,
+                            SUM(t.input_protein_kg) AS protein_kg,
+                            SUM(t.input_culture_kg) AS culture_kg,
+                            COALESCE(SUM(mu.ff_milk_kg), 0) AS ff_kg
+                       FROM wp_mf_3_dp_curd_production t
+                       $join_loc
+                       LEFT JOIN wp_mf_3_dp_milk_usage mu
+                            ON mu.flow_type = '" . self::FLOW_CURD . "' AND mu.flow_id = t.id
+                      WHERE t.entry_date BETWEEN %s AND %s $loc_cond $test_cond
+                      GROUP BY t.entry_date, t.location_id
+                      ORDER BY t.entry_date DESC, l.name",
+                    $from, $to), ARRAY_A);
+                $this->check_db('profit.curd');
+                $matka_rate   = $est[11] ?? 0;
+                $smp_rate_est = $est[7]  ?? 0;
+                $pro_rate_est = $est[8]  ?? 0;
+                $cul_rate_est = $est[9]  ?? 0;
+                foreach ($q ?: [] as $r2) {
+                    $cream   = (float)$r2['cream_kg'];
+                    $curd    = (float)$r2['curd_matka'];
+                    $smp     = (float)$r2['smp_bags'];
+                    $protein = (float)$r2['protein_kg'];
+                    $culture = (float)$r2['culture_kg'];
+                    $ff      = (float)$r2['ff_kg'];
+                    $rate    = $get_ff_rate($r2['dt'], $r2['lid']);
+                    $ff_cost    = round($ff * $rate, 2);
+                    $matka_cost = round($curd * $matka_rate, 2);
+                    $smp_cost   = round($smp * $smp_rate_est, 2);
+                    $pro_cost   = round($protein * $pro_rate_est, 2);
+                    $cul_cost   = round($culture * $cul_rate_est, 2);
+                    $cost  = $ff_cost + $matka_cost + $smp_cost + $pro_cost + $cul_cost;
+                    $value = $cream * ($est[3] ?? 0) + $curd * ($est[10] ?? 0);
+                    $profit = round($value - $cost, 2);
+                    $inputs = 'FF Milk: ' . (int)$ff . ' KG (₹' . $this->d2($rate) . ')';
+                    if ($smp > 0)        $inputs .= ', SMP: ' . (int)$smp . ' (₹' . $this->d2($smp_rate_est) . ')';
+                    if ($protein > 0)    $inputs .= ', Protein: ' . $this->d2($protein) . ' KG (₹' . $this->d2($pro_rate_est) . ')';
+                    if ($culture > 0)    $inputs .= ', Culture: ' . $this->d2($culture) . ' KG (₹' . $this->d2($cul_rate_est) . ')';
+                    if ($matka_rate > 0) $inputs .= ', Matka: ' . (int)$curd . ' (₹' . $this->d2($matka_rate) . ')';
+                    $rows[] = [
+                        'date' => $r2['dt'], 'location_name' => $r2['loc_name'],
+                        'flow' => 'curd', 'flow_label' => 'FF Milk → Cream+Curd',
+                        'inputs'  => $inputs,
+                        'outputs' => 'Cream: ' . (int)$cream . ' KG (₹' . $this->d2($est[3] ?? 0) . '), Curd: ' . (int)$curd . ' (₹' . $this->d2($est[10] ?? 0) . ')',
+                        'cost' => $cost, 'value' => round($value, 2),
+                        'profit' => $profit,
+                        'profit_pct' => $cost > 0 ? round(($profit / $cost) * 100, 1) : 0,
+                    ];
+                }
+            }
+
+            // Sort all rows by date DESC, then location, then flow
+            usort($rows, function($a, $b) {
+                $d = strcmp($b['date'], $a['date']);
+                if ($d !== 0) return $d;
+                $l = strcmp($a['location_name'] ?? '', $b['location_name'] ?? '');
+                if ($l !== 0) return $l;
+                return strcmp($a['flow'], $b['flow']);
+            });
+
+            $flows = [
+                ['key' => 'ff_milk',     'label' => 'FF Milk → Skim + Cream'],
+                ['key' => 'cream',       'label' => 'Cream → Butter + Ghee'],
+                ['key' => 'butter',      'label' => 'Butter → Ghee'],
+                ['key' => 'curd',        'label' => 'FF Milk → Cream + Curd'],
+                ['key' => 'madhusudan',  'label' => 'FF Milk → Madhusudan'],
+            ];
+
+            return $this->ok([
+                'from'  => $from,
+                'to'    => $to,
+                'flows' => $flows,
+                'rows'  => $rows,
+            ]);
+        } catch (\Exception $e) { return $this->exc('get_profitability_report', $e); }
+    }
+
     private function d1($v): string { return number_format((float)$v, 1, '.', ''); }
     private function d2($v): string { return number_format((float)$v, 2, '.', ''); }
 

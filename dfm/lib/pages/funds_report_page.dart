@@ -42,9 +42,14 @@ class _FundsReportPageState extends State<FundsReportPage> {
           ),
         ],
       ),
-      body: SelectionArea(child: Obx(() {
-        if (c.isLoading.value) return const LoadingCenter();
-        if (c.errorMessage.isNotEmpty) {
+      body: SelectionArea(child: Column(children: [
+        ReportLocationDropdown(
+          selected: c.reportLocId,
+          onChanged: (_) => c.fetchReport(),
+        ),
+        Expanded(child: Obx(() {
+          if (c.isLoading.value) return const LoadingCenter();
+          if (c.errorMessage.isNotEmpty) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -104,6 +109,7 @@ class _FundsReportPageState extends State<FundsReportPage> {
           ),
         );
       })),
+      ])),
     );
   }
 }

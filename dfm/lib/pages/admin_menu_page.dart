@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'customer_page.dart';
 import 'vendor_page.dart';
 import 'product_admin_page.dart';
+import 'pouch_type_page.dart';
 
 class AdminMenuPage extends StatelessWidget {
   const AdminMenuPage({super.key});
@@ -38,6 +39,15 @@ class AdminMenuPage extends StatelessWidget {
           subtitle: 'Edit product names, units and estimated rates',
           onTap: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const ProductAdminPage())),
+        ),
+        const SizedBox(height: 12),
+        _AdminCard(
+          icon: Icons.local_drink_outlined,
+          color: const Color(0xFF795548),
+          title: 'Pouch Types',
+          subtitle: 'Manage pouch types — name, litre, price',
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const PouchTypePage())),
         ),
       ],
     );

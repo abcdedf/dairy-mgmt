@@ -27,8 +27,6 @@ enum DataEntry {
       'Butter → Ghee',          Icons.local_fire_department_outlined),
   smpPurchase(
       'SMP / Protein / Culture Purchase', Icons.science_outlined),
-  dahiProcessing(
-      'Dahi Production',        Icons.set_meal_outlined),
   curdProduction(
       'FF Milk → Cream + Curd',  Icons.soup_kitchen_outlined),
   madhusudanSale(
@@ -40,7 +38,7 @@ enum DataEntry {
 }
 
 // Kept for backward compatibility with NavigationService / stock page
-enum DairyFlow { milkCream, creamButterGhee, butterGhee, dahi }
+enum DairyFlow { milkCream, creamButterGhee, butterGhee }
 
 // Maps server-side flow keys to DataEntry enum values
 const _keyToEntry = <String, DataEntry>{
@@ -52,7 +50,6 @@ const _keyToEntry = <String, DataEntry>{
   'butter_purchase':    DataEntry.butterPurchase,
   'butter_processing':  DataEntry.butterProcessing,
   'smp_purchase':       DataEntry.smpPurchase,
-  'dahi_processing':    DataEntry.dahiProcessing,
   'curd_production':    DataEntry.curdProduction,
   'madhusudan_sale':    DataEntry.madhusudanSale,
 };
@@ -96,11 +93,11 @@ class ProductionController extends GetxController {
   final stockSkimMilk= RxnInt(); // ProductIds.skimMilk
   final stockCream   = RxnInt(); // ProductIds.cream
   final stockButter  = RxnInt(); // ProductIds.butter
-  final stockDahi    = RxnInt(); // ProductIds.dahi
   final stockSmp     = RxnInt(); // ProductIds.smp
   final stockProtein = RxnInt(); // ProductIds.protein
   final stockCulture = RxnInt(); // ProductIds.culture
   final stockCurd    = RxnInt(); // ProductIds.curd
+  final stockMatka   = RxnInt(); // ProductIds.matka (11)
 
   // ── Saved entries for current date (shown below the form) ───
   final savedEntries       = <ProdTx>[].obs;
@@ -115,7 +112,6 @@ class ProductionController extends GetxController {
     DataEntry.butterPurchase:   ['Butter Purchase'],
     DataEntry.butterProcessing: ['Butter Processing'],
     DataEntry.smpPurchase:      ['Ingredient Purchase'],
-    DataEntry.dahiProcessing:   ['Dahi Production'],
     DataEntry.pouchProduction:  ['Pouch Production'],
     DataEntry.curdProduction:   ['Curd Production'],
     DataEntry.madhusudanSale:   ['Madhusudan Sale'],
@@ -150,31 +146,27 @@ class ProductionController extends GetxController {
   final butterUsedCtrl   = TextEditingController();
   final gheeOut3Ctrl     = TextEditingController();
 
-  // ── SMP / Protein / Culture Purchase ─────────────────────────
+  // ── SMP / Protein / Culture / Matka Purchase ─────────────────
   final smpCtrl         = TextEditingController();
   final smpRateCtrl     = TextEditingController();
   final proteinCtrl     = TextEditingController();
   final proteinRateCtrl = TextEditingController();
   final cultureCtrl     = TextEditingController();
   final cultureRateCtrl = TextEditingController();
-
-  // ── Flow 4: Dahi Processing ───────────────────────────────────
-  final dahiSkimMilkCtrl  = TextEditingController();
-  final dahiSmpCtrl       = TextEditingController();
-  final dahiProteinCtrl   = TextEditingController(); // decimal kg
-  final dahiCultureCtrl   = TextEditingController(); // decimal kg
-  final dahiContainerCtrl = TextEditingController();
-  final dahiSealCtrl      = TextEditingController(); // auto-mirrored from container
-  final dahiOutCtrl       = TextEditingController();
+  final matkaCtrl       = TextEditingController();
+  final matkaRateCtrl   = TextEditingController();
 
   // ── Flow 5: FF Milk → Cream + Pouches ──────────────────────
   final pouchCreamOutCtrl = TextEditingController();
   final pouchCreamFatCtrl = TextEditingController();
 
   // ── Flow: FF Milk → Cream + Curd ──────────────────────
-  final curdCreamOutCtrl = TextEditingController();
-  final curdCreamFatCtrl = TextEditingController();
-  final curdOutCtrl      = TextEditingController();
+  final curdCreamOutCtrl  = TextEditingController();
+  final curdCreamFatCtrl  = TextEditingController();
+  final curdOutCtrl       = TextEditingController();
+  final curdSmpCtrl       = TextEditingController();
+  final curdProteinCtrl   = TextEditingController();
+  final curdCultureCtrl   = TextEditingController();
 
   // ── Madhusudan Sale ───────────────────────────────────────
   final madhusudanRateCtrl = TextEditingController();
@@ -200,12 +192,11 @@ class ProductionController extends GetxController {
     butterInCtrl, butterInFatCtrl, butterInRateCtrl,
     butterUsedCtrl, gheeOut3Ctrl,
     smpCtrl, smpRateCtrl, proteinCtrl, proteinRateCtrl,
-    cultureCtrl, cultureRateCtrl,
-    dahiSkimMilkCtrl, dahiSmpCtrl, dahiProteinCtrl, dahiCultureCtrl,
-    dahiContainerCtrl, dahiSealCtrl, dahiOutCtrl,
+    cultureCtrl, cultureRateCtrl, matkaCtrl, matkaRateCtrl,
     pouchCreamOutCtrl, pouchCreamFatCtrl,
     madhusudanRateCtrl,
     curdCreamOutCtrl, curdCreamFatCtrl, curdOutCtrl,
+    curdSmpCtrl, curdProteinCtrl, curdCultureCtrl,
   ];
 
   Map<DataEntry, List<TextEditingController>> get _entryFields => {
@@ -213,17 +204,15 @@ class ProductionController extends GetxController {
     DataEntry.creamPurchase:    [creamInCtrl, creamInFatCtrl, creamInRateCtrl],
     DataEntry.butterPurchase:   [butterInCtrl, butterInFatCtrl, butterInRateCtrl],
     DataEntry.smpPurchase:      [smpCtrl, smpRateCtrl, proteinCtrl, proteinRateCtrl,
-                                  cultureCtrl, cultureRateCtrl],
+                                  cultureCtrl, cultureRateCtrl, matkaCtrl, matkaRateCtrl],
     DataEntry.ffMilkProcessing: [ffMilkUsedCtrl, skimMilkCtrl, outSkimSnfCtrl,
                                   creamOutCtrl, creamFatCtrl],
     DataEntry.creamProcessing:  [creamUsedCtrl, butterOutCtrl, butterFatCtrl,
                                   gheeOutCtrl],
     DataEntry.butterProcessing: [butterUsedCtrl, gheeOut3Ctrl],
-    DataEntry.dahiProcessing:   [dahiSkimMilkCtrl, dahiSmpCtrl, dahiProteinCtrl,
-                                  dahiCultureCtrl, dahiContainerCtrl,
-                                  dahiSealCtrl, dahiOutCtrl],
     DataEntry.pouchProduction:  [pouchCreamOutCtrl, pouchCreamFatCtrl],
-    DataEntry.curdProduction:   [curdCreamOutCtrl, curdCreamFatCtrl, curdOutCtrl],
+    DataEntry.curdProduction:   [curdCreamOutCtrl, curdCreamFatCtrl, curdOutCtrl,
+                                  curdSmpCtrl, curdProteinCtrl, curdCultureCtrl],
     DataEntry.madhusudanSale:   [madhusudanRateCtrl],
   };
 
@@ -237,7 +226,6 @@ class ProductionController extends GetxController {
     DataEntry.butterPurchase   => '/butter-input',
     DataEntry.butterProcessing => '/butter-ghee',
     DataEntry.smpPurchase      => '/smp-purchase',
-    DataEntry.dahiProcessing   => '/dahi',
     DataEntry.pouchProduction  => '/pouch-production',
     DataEntry.curdProduction   => '/curd-production',
     DataEntry.madhusudanSale   => '/madhusudan-sale',
@@ -266,12 +254,6 @@ class ProductionController extends GetxController {
       _fetchSavedEntries();
       if (_.name == 'ffMilkProcessing' || _.name == 'pouchProduction' || _.name == 'madhusudanSale' || _.name == 'curdProduction') {
         _fetchMilkAvailability();
-      }
-    });
-    // Mirror container count → seal count automatically
-    dahiContainerCtrl.addListener(() {
-      if (dahiSealCtrl.text != dahiContainerCtrl.text) {
-        dahiSealCtrl.text = dahiContainerCtrl.text;
       }
     });
     _fetchStock();
@@ -409,11 +391,11 @@ class ProductionController extends GetxController {
       stockSkimMilk.value = null;
       stockCream.value    = null;
       stockButter.value   = null;
-      stockDahi.value     = null;
       stockSmp.value      = null;
       stockProtein.value  = null;
       stockCulture.value  = null;
       stockCurd.value     = null;
+      stockMatka.value    = null;
       return;
     }
     final last   = dates.last as Map<String, dynamic>;
@@ -426,11 +408,11 @@ class ProductionController extends GetxController {
     stockSkimMilk.value = val(ProductIds.skimMilk);
     stockCream.value    = val(ProductIds.cream);
     stockButter.value   = val(ProductIds.butter);
-    stockDahi.value     = val(ProductIds.dahi);
     stockSmp.value      = val(ProductIds.smp);
     stockProtein.value  = val(ProductIds.protein);
     stockCulture.value  = val(ProductIds.culture);
     stockCurd.value     = val(ProductIds.curd);
+    stockMatka.value    = val(11);
   }
 
   // ── Fetch saved entries for current date + flow type ──────────
@@ -439,8 +421,12 @@ class ProductionController extends GetxController {
     final locId = LocationService.instance.locId;
     if (locId == null) return;
     isLoadingEntries.value = true;
+    // Fetch 7 days ending on the selected date
+    final to = _date;
+    final from = DateFormat('yyyy-MM-dd')
+        .format(entryDate.value.subtract(const Duration(days: 6)));
     final res = await ApiClient.get(
-        '/production-transactions?location_id=$locId&entry_date=$_date');
+        '/production-transactions?location_id=$locId&from=$from&to=$to');
     if (res.ok) {
       final allRows = (res.data['rows'] as List)
           .map((e) => ProdTx.fromJson(e as Map<String, dynamic>))
@@ -547,22 +533,9 @@ class ProductionController extends GetxController {
           'protein_rate': double.tryParse(proteinRateCtrl.text) ?? 0,
           'culture_kg':   double.tryParse(cultureCtrl.text) ?? 0,
           'culture_rate': double.tryParse(cultureRateCtrl.text) ?? 0,
+          'matka_qty':    double.tryParse(matkaCtrl.text)    ?? 0,
+          'matka_rate':   double.tryParse(matkaRateCtrl.text) ?? 0,
         };
-
-      case DataEntry.dahiProcessing:
-        final containers = int.tryParse(dahiContainerCtrl.text) ?? 0;
-        payload = DahiInput(
-          locationId:           locId,
-          entryDate:            _date,
-          skimMilkKg:           int.tryParse(dahiSkimMilkCtrl.text) ?? 0,
-          smpBags:              int.tryParse(dahiSmpCtrl.text) ?? 0,
-          // FIX: cultureKg and proteinKg are now double (DB is DECIMAL(10,2))
-          cultureKg:            double.tryParse(dahiCultureCtrl.text) ?? 0,
-          proteinKg:            double.tryParse(dahiProteinCtrl.text) ?? 0,
-          containerCount:       containers,
-          sealCount:            containers, // always mirrors container count
-          outputContainerCount: int.tryParse(dahiOutCtrl.text) ?? 0,
-        ).toJson();
 
       case DataEntry.pouchProduction:
         // Build milk_usage from vendor picker rows
@@ -602,6 +575,9 @@ class ProductionController extends GetxController {
             'output_cream_kg': int.tryParse(curdCreamOutCtrl.text) ?? 0,
             'output_cream_fat': double.tryParse(curdCreamFatCtrl.text) ?? 0,
             'output_curd_matka': int.tryParse(curdOutCtrl.text) ?? 0,
+            'input_smp_bags': int.tryParse(curdSmpCtrl.text) ?? 0,
+            'input_protein_kg': double.tryParse(curdProteinCtrl.text) ?? 0,
+            'input_culture_kg': double.tryParse(curdCultureCtrl.text) ?? 0,
             'milk_usage': muList,
         };
 

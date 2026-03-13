@@ -47,17 +47,22 @@ class _StockValuationPageState extends State<StockValuationPage> {
           ),
         ],
       ),
-      body: SelectionArea(child: Obx(() {
-        if (ctrl.isLoading.value) return const LoadingCenter();
-        if (ctrl.errorMessage.value.isNotEmpty) {
-          return EmptyState(
-            icon: Icons.error_outline,
-            message: ctrl.errorMessage.value,
-            buttonLabel: 'Retry',
-            onButton: ctrl.fetchValuation,
-          );
-        }
-        return Column(children: [
+      body: SelectionArea(child: Column(children: [
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchValuation(),
+        ),
+        Expanded(child: Obx(() {
+          if (ctrl.isLoading.value) return const LoadingCenter();
+          if (ctrl.errorMessage.value.isNotEmpty) {
+            return EmptyState(
+              icon: Icons.error_outline,
+              message: ctrl.errorMessage.value,
+              buttonLabel: 'Retry',
+              onButton: ctrl.fetchValuation,
+            );
+          }
+          return Column(children: [
           // ── Action bar: edit rates + refresh ────────────
           Container(
             color: Colors.white,
@@ -107,6 +112,7 @@ class _StockValuationPageState extends State<StockValuationPage> {
           ),
         ]);
       })),
+      ])),
     );
   }
 }

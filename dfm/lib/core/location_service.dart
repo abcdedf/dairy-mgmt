@@ -20,16 +20,11 @@ class LocationService {
   int? get locId => selected.value?.id;
 
   // Called once after login when permissions are loaded.
-  // Defaults to a location named "Test" (case-insensitive) if one exists —
-  // so accidental data entry goes to Test, not a production location.
-  // If no Test location exists, falls back to the first in the list.
+  // Defaults to the first location in the server-sorted list.
   void init() {
     final locs = locations;
     if (locs.isEmpty) return;
-    selected.value =
-        locs.firstWhereOrNull(
-            (l) => l.name.trim().toLowerCase() == 'test') ??
-        locs.first;
+    selected.value = locs.first;
   }
 
   void select(int? id) {

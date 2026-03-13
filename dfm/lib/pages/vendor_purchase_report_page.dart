@@ -31,9 +31,16 @@ class _VendorPurchaseReportPageState extends State<VendorPurchaseReportPage> {
 
   void _exportCsv(VendorPurchaseReportController c) {
     if (c.rows.isEmpty) return;
-    const headers = ['Date', 'Vendor', 'Product', 'Qty KG', 'Fat', 'Rate', 'Amount'];
+    final showLoc = c.rows.any((r) => r.locationName != null && r.locationName!.isNotEmpty);
+    final headers = [
+      'Date',
+      if (showLoc) 'Location',
+      'Vendor', 'Product', 'Qty KG', 'Fat', 'Rate', 'Amount',
+    ];
     final csvRows = c.rows.map((r) => [
-      r.date, r.vendor, r.product,
+      r.date,
+      if (showLoc) r.locationName ?? '',
+      r.vendor, r.product,
       '${r.quantityKg}', r.fat.toStringAsFixed(1),
       r.rate.toStringAsFixed(2), r.amount.toStringAsFixed(2),
     ]).toList();
@@ -62,7 +69,12 @@ class _VendorPurchaseReportPageState extends State<VendorPurchaseReportPage> {
         ],
       ),
       body: SelectionArea(child: Column(children: [
-        // ── Body ──────────────────────────────────────
+        // Location dropdown
+        ReportLocationDropdown(
+          selected: ctrl.reportLocId,
+          onChanged: (_) => ctrl.fetchReport(),
+        ),
+        // Body
         Expanded(child: Obx(() {
           if (ctrl.isLoading.value) return const LoadingCenter();
           if (ctrl.errorMessage.value.isNotEmpty) {
@@ -94,55 +106,63 @@ class _ReportBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final dateFmt = DateFormat('dd MMM');
     final inrFmt  = NumberFormat('#,##,##0.00', 'en_IN');
+    final showLoc = ctrl.rows.any((r) => r.locationName != null && r.locationName!.isNotEmpty);
 
     return Column(children: [
-      // ── Header ────────────────────────────────────
+      // Header
       Container(
         color: kNavy,
-        padding: const EdgeInsets.symmetric(
-            horizontal: 12, vertical: 10),
-        child: const Row(children: [
-          Expanded(flex: 2, child: Text('Date',
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(children: [
+          const Expanded(flex: 2, child: Text('Date',
               style: TextStyle(color: Colors.white,
                   fontWeight: FontWeight.w700, fontSize: 12))),
-          Expanded(flex: 3, child: Text('Vendor',
+          if (showLoc)
+            const Expanded(flex: 2, child: Text('Location',
+                style: TextStyle(color: Colors.white,
+                    fontWeight: FontWeight.w700, fontSize: 12))),
+          const Expanded(flex: 3, child: Text('Vendor',
               style: TextStyle(color: Colors.white,
                   fontWeight: FontWeight.w700, fontSize: 12))),
-          Expanded(flex: 2, child: Text('Product',
+          const Expanded(flex: 2, child: Text('Product',
               style: TextStyle(color: Colors.white,
                   fontWeight: FontWeight.w700, fontSize: 12))),
-          Expanded(flex: 2, child: Text('Qty KG',
+          const Expanded(flex: 2, child: Text('Qty KG',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white,
                   fontWeight: FontWeight.w700, fontSize: 12))),
-          Expanded(flex: 2, child: Text('Rate',
+          const Expanded(flex: 2, child: Text('Rate',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white,
                   fontWeight: FontWeight.w700, fontSize: 12))),
-          Expanded(flex: 2, child: Text('Amount',
+          const Expanded(flex: 2, child: Text('Amount',
               textAlign: TextAlign.right,
               style: TextStyle(color: Colors.white,
                   fontWeight: FontWeight.w700, fontSize: 12))),
         ]),
       ),
-      // ── Rows ──────────────────────────────────────
+      // Rows
       Expanded(child: Obx(() => ListView.separated(
         itemCount: ctrl.rows.length,
         separatorBuilder: (_, __) =>
             Divider(height: 1, color: Colors.grey.shade200),
         itemBuilder: (_, i) {
-          final row   = ctrl.rows[i];
-          final even  = i.isEven;
+          final row  = ctrl.rows[i];
+          final even = i.isEven;
           return Container(
             color: even ? Colors.white : const Color(0xFFF8F9FA),
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 9),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             child: Row(children: [
               Expanded(flex: 2, child: Text(
                 dateFmt.format(DateTime.parse(row.date)),
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               )),
+              if (showLoc)
+                Expanded(flex: 2, child: Text(
+                  row.locationName ?? '',
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                )),
               Expanded(flex: 3, child: Text(
                 row.vendor,
                 style: const TextStyle(fontSize: 12),
@@ -150,8 +170,7 @@ class _ReportBody extends StatelessWidget {
               )),
               Expanded(flex: 2, child: Text(
                 row.product,
-                style: TextStyle(
-                    fontSize: 12, color: Colors.grey.shade700),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
               )),
               Expanded(flex: 2, child: Text(
                 '${row.quantityKg}',
@@ -159,7 +178,7 @@ class _ReportBody extends StatelessWidget {
                 style: const TextStyle(fontSize: 12),
               )),
               Expanded(flex: 2, child: Text(
-                '₹${row.rate.toStringAsFixed(2)}',
+                '\u20B9${row.rate.toStringAsFixed(2)}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 12),
               )),
@@ -167,22 +186,19 @@ class _ReportBody extends StatelessWidget {
                 inrFmt.format(row.amount),
                 textAlign: TextAlign.right,
                 style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600,
-                    color: kGreen),
+                    fontSize: 12, fontWeight: FontWeight.w600, color: kGreen),
               )),
             ]),
           );
         },
       ))),
-      // ── Totals footer ─────────────────────────────
+      // Totals footer
       Obx(() => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 12, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border(
-              top: BorderSide(
-                  color: Colors.grey.shade300, width: 1.5)),
+              top: BorderSide(color: Colors.grey.shade300, width: 1.5)),
           boxShadow: [BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 6, offset: const Offset(0, -2),
@@ -190,17 +206,14 @@ class _ReportBody extends StatelessWidget {
         ),
         child: Row(children: [
           const Expanded(child: Text('Total',
-              style: TextStyle(
-                  fontWeight: FontWeight.w700, fontSize: 14))),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14))),
           Text('${ctrl.totalQty.value} KG',
               style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13, color: kNavy)),
+                  fontWeight: FontWeight.w600, fontSize: 13, color: kNavy)),
           const SizedBox(width: 16),
-          Text('₹${NumberFormat('#,##,##0.00', 'en_IN').format(ctrl.totalAmount.value)}',
+          Text('\u20B9${NumberFormat('#,##,##0.00', 'en_IN').format(ctrl.totalAmount.value)}',
               style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14, color: kNavy)),
+                  fontWeight: FontWeight.w800, fontSize: 14, color: kNavy)),
         ]),
       )),
     ]);
