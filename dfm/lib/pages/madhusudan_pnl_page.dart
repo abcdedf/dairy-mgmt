@@ -63,7 +63,7 @@ class _MadhusudanPnlPageState extends State<MadhusudanPnlPage> {
           ),
         ],
       ),
-      body: Column(children: [
+      body: SelectionArea(child: Column(children: [
         Expanded(child: Obx(() {
           if (ctrl.isLoading.value) return const LoadingCenter();
           if (ctrl.errorMessage.value.isNotEmpty) {
@@ -82,7 +82,7 @@ class _MadhusudanPnlPageState extends State<MadhusudanPnlPage> {
           }
           return _ReportBody(ctrl: ctrl);
         })),
-      ]),
+      ])),
     );
   }
 }

@@ -25,7 +25,7 @@ class SalesPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _Header(ctrl: ctrl),
-                  _PendingSection(ctrl: ctrl),
+                  _EntryForm(ctrl: ctrl),
                   const Divider(height: 1, thickness: 1),
                   _SavedEntries(ctrl: ctrl),
                 ],
@@ -82,18 +82,12 @@ class _Header extends StatelessWidget {
 
           const SizedBox(height: 6),
 
-          // ── Feedback ────────────────────────────────
+          // ── Error feedback ───────────────────────────
           Obx(() {
             if (ctrl.errorMessage.value.isNotEmpty) {
               return Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: FeedbackBanner(ctrl.errorMessage.value, isError: true),
-              );
-            }
-            if (ctrl.successMessage.value.isNotEmpty) {
-              return Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: FeedbackBanner(ctrl.successMessage.value, isError: false),
               );
             }
             return const SizedBox.shrink();
@@ -104,148 +98,82 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ── Pending entry rows ────────────────────────────────────────
+// ── Single entry form ─────────────────────────────────────────
 
-class _PendingSection extends StatelessWidget {
+class _EntryForm extends StatelessWidget {
   final SalesController ctrl;
-  const _PendingSection({required this.ctrl});
+  const _EntryForm({required this.ctrl});
 
   @override
   Widget build(BuildContext context) {
-    return Obx(() {
-      if (ctrl.pendingRows.isEmpty) return const SizedBox.shrink();
-      return Container(
-        color: Colors.white,
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-        child: Form(
-          key: ctrl.formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ...List.generate(ctrl.pendingRows.length, (i) {
-                return _PendingRowWidget(ctrl: ctrl, index: i);
-              }),
-
-              const SizedBox(height: 8),
-
-              // ── Add Row + Save All ──────────────────
-              Row(children: [
-                OutlinedButton.icon(
-                  onPressed: ctrl.addRow,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Add Row',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: kNavy,
-                    side: const BorderSide(color: kNavy),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(child: Obx(() => ElevatedButton.icon(
-                  onPressed: ctrl.isSaving.value ? null : ctrl.saveAll,
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Form(
+        key: ctrl.formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Product + Customer (product first, customer filtered) ──
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Obx(() => DropdownButtonFormField<int>(
+                value: ctrl.productId.value,
+                decoration: fieldDec('Product', isDense: true),
+                items: ctrl.products.map((p) => DropdownMenuItem(
+                    value: p.id,
+                    child: Text(p.name, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: ctrl.onProductChanged,
+                isExpanded: true,
+              ))),
+              const SizedBox(width: 6),
+              Expanded(child: Obx(() => DropdownButtonFormField<int>(
+                key: ValueKey('cust_${ctrl.productId.value}'),
+                value: ctrl.customerId.value,
+                decoration: fieldDec('Customer', isDense: true),
+                items: ctrl.filteredCustomers.map((cu) => DropdownMenuItem(
+                    value: cu.id,
+                    child: Text(cu.name, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: (id) => ctrl.customerId.value = id,
+                isExpanded: true,
+              ))),
+            ]),
+            const SizedBox(height: 6),
+            // ── Qty + Rate + Save ────────────────────
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Obx(() =>
+                  IntField(ctrl.qtyCtrl, 'Qty', ctrl.selectedUnit, maxDigits: 5))),
+              const SizedBox(width: 6),
+              Expanded(child: RateField(ctrl.rateCtrl, 'Rate')),
+              const SizedBox(width: 6),
+              SizedBox(
+                height: 48,
+                child: Obx(() => ElevatedButton.icon(
+                  onPressed: ctrl.isSaving.value ? null : ctrl.save,
                   icon: ctrl.isSaving.value
                       ? const SizedBox(width: 16, height: 16,
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
                       : const Icon(Icons.save_outlined, size: 16),
                   label: Text(
-                    ctrl.isSaving.value ? 'Saving…' : 'Save All',
+                    ctrl.isSaving.value ? 'Saving…' : 'Save',
                     style: const TextStyle(
                         fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: kGreen,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
                     disabledBackgroundColor: kGreen.withValues(alpha: 0.5),
                   ),
-                ))),
-              ]),
-            ],
-          ),
+                )),
+              ),
+            ]),
+          ],
         ),
-      );
-    });
-  }
-}
-
-// ── Single pending row ────────────────────────────────────────
-
-class _PendingRowWidget extends StatelessWidget {
-  final SalesController ctrl;
-  final int index;
-  const _PendingRowWidget({required this.ctrl, required this.index});
-
-  @override
-  Widget build(BuildContext context) {
-    final row = ctrl.pendingRows[index];
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FA),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300, width: 0.5),
-      ),
-      child: Column(
-        children: [
-          // ── Row header: # and delete ────────────
-          Row(children: [
-            Container(
-              width: 22, height: 22,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: kNavy.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text('${index + 1}',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: kNavy)),
-            ),
-            const Spacer(),
-            if (ctrl.pendingRows.length > 1)
-              InkWell(
-                onTap: () => ctrl.removeRow(index),
-                child: Icon(Icons.close, size: 18, color: Colors.grey.shade500),
-              ),
-          ]),
-          const SizedBox(height: 6),
-          // ── Customer + Product ───────────────────
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: Obx(() => DropdownButtonFormField<int>(
-              initialValue: row.customerId.value,
-              decoration: fieldDec('Customer', isDense: true),
-              items: ctrl.customers.map((cu) => DropdownMenuItem(
-                  value: cu.id,
-                  child: Text(cu.name, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12)))).toList(),
-              onChanged: (id) => row.customerId.value = id,
-              isExpanded: true,
-            ))),
-            const SizedBox(width: 6),
-            Expanded(child: Obx(() => DropdownButtonFormField<int>(
-              initialValue: row.productId.value,
-              decoration: fieldDec('Item', isDense: true),
-              items: ctrl.products.map((p) => DropdownMenuItem(
-                  value: p.id,
-                  child: Text(p.name, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12)))).toList(),
-              onChanged: (id) => row.productId.value = id,
-              isExpanded: true,
-            ))),
-          ]),
-          const SizedBox(height: 6),
-          // ── Qty + Rate ──────────────────────────
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: IntField(row.qtyCtrl, 'Qty', 'KG', maxDigits: 5)),
-            const SizedBox(width: 6),
-            Expanded(child: RateField(row.rateCtrl, 'Rate')),
-          ]),
-        ],
       ),
     );
   }
@@ -299,6 +227,9 @@ class _SavedEntries extends StatelessWidget {
         ...List.generate(entries.length, (i) {
           final entry = entries[i];
           final deletable = ctrl.canDelete(entry.id);
+          final unit = ctrl.products
+              .firstWhereOrNull((p) => p.id == entry.productId)
+              ?.unit ?? 'KG';
           return Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -317,7 +248,7 @@ class _SavedEntries extends StatelessWidget {
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                 ],
               )),
-              Expanded(flex: 2, child: Text('${entry.quantityKg} KG',
+              Expanded(flex: 2, child: Text('${entry.quantityKg} $unit',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 13))),
               Expanded(flex: 2, child: Text('₹${entry.rate.toStringAsFixed(2)}',
@@ -366,7 +297,7 @@ class _DayTotalFooter extends StatelessWidget {
         child: Row(children: [
           const Expanded(flex: 3, child: Text('Day Total',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
-          Expanded(flex: 2, child: Text('${ctrl.dayQty} KG',
+          Expanded(flex: 2, child: Text('${ctrl.dayQty}',
               textAlign: TextAlign.center,
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.grey.shade700))),
           const Expanded(flex: 2, child: SizedBox.shrink()),

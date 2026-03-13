@@ -78,7 +78,7 @@ You can make changes to project.
 ## Making changes to wordpress server:
 The code is maintained locally at dfm-backend/  
 Make changes there, verify php syntax etc. Once satisfied, copy the code to the wordpress server.
-You can use "scp -i ../pem/awsls001.pem ...". to copy the file to the server.
+You can use "scp -i /Users/abhayapat/git-repos/pem/awsls001.pem ...". to copy the file to the server.
 Do not edit the server php code directly. I want the most up to date copy be available for source control. So, edit locally and scp to the server.
 SSH user: bitnami
 Plugin root folder is at /opt/bitnami/wordpress/wp-content/plugins
@@ -96,19 +96,19 @@ The instruction may not be complete. Ask me any questions and update this file a
 
 ## Running the App
 
-The server URL is configured via `--dart-define-from-file`. The file lives at `../../pem/dart_defines.json` (outside source control, alongside credentials). The default in `app_config.dart` is a placeholder — **always** pass the defines file using the absolute path.
+The server URL is configured via `--dart-define-from-file`. The file lives at `/Users/abhayapat/git-repos/pem/dart_defines.json` (outside source control, alongside credentials). The default in `app_config.dart` is a placeholder — **always** pass the defines file using the absolute path.
 
 ```bash
 # Flutter commands must be run from dfm/ — not the parent
 cd dfm
 
-flutter run -d chrome --dart-define-from-file=../../pem/dart_defines.json    # Run on Chrome
-flutter run --dart-define-from-file=../../pem/dart_defines.json              # Run on connected device
-flutter run -d <device-id> --dart-define-from-file=../../pem/dart_defines.json
+flutter run -d chrome --dart-define-from-file=/Users/abhayapat/git-repos/pem/dart_defines.json    # Run on Chrome
+flutter run --dart-define-from-file=/Users/abhayapat/git-repos/pem/dart_defines.json              # Run on connected device
+flutter run -d <device-id> --dart-define-from-file=/Users/abhayapat/git-repos/pem/dart_defines.json
 flutter devices                 # List available devices
 
 # Production build
-flutter build web --base-href /dairyapp/ --dart-define-from-file=../../pem/dart_defines.json
+flutter build web --base-href /dairyapp/ --dart-define-from-file=/Users/abhayapat/git-repos/pem/dart_defines.json
 ```
 
 ---
@@ -386,13 +386,13 @@ flutter build web --base-href /dairyapp/
 **CRITICAL: NEVER deploy to the server (Flutter web build, PHP plugin, or any file) unless the user explicitly says "deploy" or "publish". The server is a PRODUCTION host. All testing must be done locally using `flutter run -d chrome`. This applies to both Flutter and PHP files — do not scp anything to the server without explicit ask.**
 Access to the server is ssh. The pem details are given in an earlier section.
 Path for the site on the server: /opt/bitnami/wordpress/dairyapp
-The server is accessed through ssh/scp: `ssh -i ../pem/awsls001.pem bitnami@www.nkp45fd.fanol.xyz`
+The server is accessed through ssh/scp: `ssh -i /Users/abhayapat/git-repos/pem/awsls001.pem bitnami@www.nkp45fd.fanol.xyz`
 URL accessing the app on the web: https://www.nkp45fd.fanol.xyz/dairyapp/
 
 ## Source Control
 **CRITICAL: Claude works ONLY with the local copy. Do NOT run ANY git commands — no `git log`, `git status`, `git diff`, `git commit`, `git push`, `git pull`, `git checkout`, or any other git operation. Do NOT interact with any remote repository (GitHub, Bitbucket, or otherwise). The project owner manages ALL version control operations manually. This includes read-only git commands — do not use git to inspect history, check file status, or any other purpose.**
 
 ## User credential for all testing
-See: ../../pem/dairy-mgmt-credentials.txt (outside source control)
+See: /Users/abhayapat/git-repos/pem/dairy-mgmt-credentials.txt (outside source control)
 
 

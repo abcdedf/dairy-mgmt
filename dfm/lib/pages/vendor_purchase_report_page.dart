@@ -61,7 +61,7 @@ class _VendorPurchaseReportPageState extends State<VendorPurchaseReportPage> {
           ),
         ],
       ),
-      body: Column(children: [
+      body: SelectionArea(child: Column(children: [
         // ── Body ──────────────────────────────────────
         Expanded(child: Obx(() {
           if (ctrl.isLoading.value) return const LoadingCenter();
@@ -81,7 +81,7 @@ class _VendorPurchaseReportPageState extends State<VendorPurchaseReportPage> {
           }
           return _ReportBody(ctrl: ctrl);
         })),
-      ]),
+      ])),
     );
   }
 }

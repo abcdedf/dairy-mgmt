@@ -41,7 +41,7 @@ class _PouchStockPageState extends State<PouchStockPage> {
           ),
         ],
       ),
-      body: Obx(() {
+      body: SelectionArea(child: Obx(() {
         if (ctrl.isLoading.value && ctrl.pouchStock.isEmpty) return const LoadingCenter();
         if (ctrl.errorMessage.value.isNotEmpty) {
           return Center(child: Padding(
@@ -86,7 +86,7 @@ class _PouchStockPageState extends State<PouchStockPage> {
             ),
           ),
         );
-      }),
+      })),
     );
   }
 }

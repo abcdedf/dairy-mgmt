@@ -32,6 +32,7 @@ class VendorSummary {
 class LedgerTransaction {
   final String  type;         // 'purchase' or 'payment'
   final String  date;
+  final String? vendorName;
   final String? product;
   final double? quantity;
   final double? rate;
@@ -44,6 +45,7 @@ class LedgerTransaction {
   const LedgerTransaction({
     required this.type,
     required this.date,
+    this.vendorName,
     this.product,
     this.quantity,
     this.rate,
@@ -57,6 +59,7 @@ class LedgerTransaction {
   factory LedgerTransaction.fromJson(Map<String, dynamic> j) => LedgerTransaction(
     type:         j['type'] ?? '',
     date:         j['date'] ?? '',
+    vendorName:   j['vendor_name'],
     product:      j['product'],
     quantity:     j['quantity'] != null ? double.parse(j['quantity'].toString()) : null,
     rate:         j['rate'] != null ? double.parse(j['rate'].toString()) : null,
@@ -65,6 +68,16 @@ class LedgerTransaction {
     note:         j['note'],
     locationName: j['location_name'],
     userName:     j['user_name'],
+  );
+}
+
+class VendorDropdownItem {
+  final int id;
+  final String name;
+  const VendorDropdownItem({required this.id, required this.name});
+  factory VendorDropdownItem.fromJson(Map<String, dynamic> j) => VendorDropdownItem(
+    id:   int.parse(j['id'].toString()),
+    name: j['name']?.toString() ?? '',
   );
 }
 
@@ -79,6 +92,10 @@ class VendorLedgerController extends GetxController {
   final detailPurchases  = 0.0.obs;
   final detailPayments   = 0.0.obs;
   final detailBalance    = 0.0.obs;
+
+  // Vendor dropdown for detail view
+  final vendorList       = <VendorDropdownItem>[].obs;
+  final selectedVendorId = 0.obs;  // 0 = All
 
   final _fmt = DateFormat('yyyy-MM-dd');
 
@@ -107,6 +124,7 @@ class VendorLedgerController extends GetxController {
   Future<void> fetchDetail(int vendorId) async {
     isLoadingDetail.value = true;
     errorMessage.value    = '';
+    selectedVendorId.value = vendorId;
     final locId = LocationService.instance.locId;
     final locParam = locId != null ? '&location_id=$locId' : '';
     final res = await ApiClient.get('/vendor-ledger-detail?vendor_id=$vendorId$locParam');
@@ -119,6 +137,12 @@ class VendorLedgerController extends GetxController {
       transactions.value     = (res.data['transactions'] as List)
           .map((e) => LedgerTransaction.fromJson(e as Map<String, dynamic>))
           .toList();
+      // Populate vendor dropdown list
+      if (res.data['vendors'] != null) {
+        vendorList.value = (res.data['vendors'] as List)
+            .map((e) => VendorDropdownItem.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
     } else {
       errorMessage.value = res.message ?? 'Failed to load vendor details.';
     }

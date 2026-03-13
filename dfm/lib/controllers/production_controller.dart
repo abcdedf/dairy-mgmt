@@ -7,6 +7,7 @@ import '../core/api_client.dart';
 import '../core/navigation_service.dart';
 import '../core/location_service.dart';
 import '../models/models.dart';
+import 'transactions_controller.dart';
 
 // All data entry types shown in the dropdown
 enum DataEntry {
@@ -100,6 +101,25 @@ class ProductionController extends GetxController {
   final stockProtein = RxnInt(); // ProductIds.protein
   final stockCulture = RxnInt(); // ProductIds.culture
   final stockCurd    = RxnInt(); // ProductIds.curd
+
+  // ── Saved entries for current date (shown below the form) ───
+  final savedEntries       = <ProdTx>[].obs;
+  final isLoadingEntries   = false.obs;
+
+  // Maps DataEntry → backend type string(s) from production-transactions
+  static const _entryTypeMap = <DataEntry, List<String>>{
+    DataEntry.ffMilkPurchase:   ['FF Milk Purchase'],
+    DataEntry.ffMilkProcessing: ['FF Milk Processing'],
+    DataEntry.creamPurchase:    ['Cream Purchase'],
+    DataEntry.creamProcessing:  ['Cream Processing'],
+    DataEntry.butterPurchase:   ['Butter Purchase'],
+    DataEntry.butterProcessing: ['Butter Processing'],
+    DataEntry.smpPurchase:      ['Ingredient Purchase'],
+    DataEntry.dahiProcessing:   ['Dahi Production'],
+    DataEntry.pouchProduction:  ['Pouch Production'],
+    DataEntry.curdProduction:   ['Curd Production'],
+    DataEntry.madhusudanSale:   ['Madhusudan Sale'],
+  };
 
   final formKey = GlobalKey<FormState>();
 
@@ -238,10 +258,12 @@ class ProductionController extends GetxController {
       _loadVendors();
       _fetchStock();
       _fetchMilkAvailability();
+      _fetchSavedEntries();
     });
-    ever(entryDate, (_) { _fetchStock(); _fetchMilkAvailability(); });
+    ever(entryDate, (_) { _fetchStock(); _fetchMilkAvailability(); _fetchSavedEntries(); });
     ever(selectedEntry, (_) {
       _fetchStock();
+      _fetchSavedEntries();
       if (_.name == 'ffMilkProcessing' || _.name == 'pouchProduction' || _.name == 'madhusudanSale' || _.name == 'curdProduction') {
         _fetchMilkAvailability();
       }
@@ -253,6 +275,7 @@ class ProductionController extends GetxController {
       }
     });
     _fetchStock();
+    _fetchSavedEntries();
   }
 
   @override
@@ -408,6 +431,26 @@ class ProductionController extends GetxController {
     stockProtein.value  = val(ProductIds.protein);
     stockCulture.value  = val(ProductIds.culture);
     stockCurd.value     = val(ProductIds.curd);
+  }
+
+  // ── Fetch saved entries for current date + flow type ──────────
+
+  Future<void> _fetchSavedEntries() async {
+    final locId = LocationService.instance.locId;
+    if (locId == null) return;
+    isLoadingEntries.value = true;
+    final res = await ApiClient.get(
+        '/production-transactions?location_id=$locId&entry_date=$_date');
+    if (res.ok) {
+      final allRows = (res.data['rows'] as List)
+          .map((e) => ProdTx.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final types = _entryTypeMap[selectedEntry.value] ?? [];
+      savedEntries.value = allRows.where((r) => types.contains(r.type)).toList();
+    } else {
+      savedEntries.clear();
+    }
+    isLoadingEntries.value = false;
   }
 
   // ── Save ──────────────────────────────────────────────────────
@@ -588,8 +631,14 @@ class ProductionController extends GetxController {
       resetPouchLineRows();
       errorMessage.value   = '';
       successMessage.value = 'Saved successfully.';
+      Get.showSnackbar(const GetSnackBar(
+        message: 'Saved successfully.',
+        duration: Duration(seconds: 2),
+        snackPosition: SnackPosition.TOP,
+      ));
       await _fetchStock();
       await _fetchMilkAvailability();
+      await _fetchSavedEntries();
     } else {
       errorMessage.value = res.message ?? 'Save failed.';
     }

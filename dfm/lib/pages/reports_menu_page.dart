@@ -5,6 +5,7 @@ import 'sales_report_page.dart';
 import 'vendor_purchase_report_page.dart';
 import 'vendor_ledger_page.dart';
 import 'funds_report_page.dart';
+import 'cashflow_report_page.dart';
 import 'transactions_page.dart';
 import 'stock_page.dart';
 import 'stock_valuation_page.dart';
@@ -27,10 +28,19 @@ class ReportsMenuPage extends StatelessWidget {
           _ReportCard(
             icon: Icons.table_chart_outlined,
             color: const Color(0xFF1A73E8),
-            title: 'Daily Sales Summary',
+            title: 'Daily Product Sales Report',
             subtitle: 'Product-wise sales aggregated by date — last 30 days',
             onTap: () => Navigator.push(context, MaterialPageRoute(
                 builder: (_) => const DailySalesReportPage())),
+          ),
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.receipt_outlined,
+            color: const Color(0xFF6A1B9A),
+            title: 'Daily Customer Sales Report',
+            subtitle: 'All sales by customer with product, qty, rate and total — last 30 days',
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const SalesLedgerPage())),
           ),
           const SizedBox(height: 12),
           _ReportCard(
@@ -80,6 +90,15 @@ class ReportsMenuPage extends StatelessWidget {
             ),
           ],
           if (_can('funds_report')) ...[
+            const SizedBox(height: 12),
+            _ReportCard(
+              icon: Icons.account_balance_outlined,
+              color: const Color(0xFF0D47A1),
+              title: 'Cash Flow Report',
+              subtitle: 'Daily cash position — sales, purchases, payments and running balance',
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const CashflowReportPage())),
+            ),
             const SizedBox(height: 12),
             _ReportCard(
               icon: Icons.account_balance_outlined,

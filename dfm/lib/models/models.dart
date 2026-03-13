@@ -14,18 +14,34 @@ class DairyLocation {
 class Customer {
   final int    id;
   final String name;
-  const Customer({required this.id, required this.name});
-  factory Customer.fromJson(Map<String, dynamic> j) =>
-      Customer(id: int.parse(j['id'].toString()), name: j['name'].toString());
+  final bool   isActive;
+  final List<int> productIds;
+  const Customer({required this.id, required this.name, this.isActive = true, this.productIds = const [], this.locationIds = const []});
+  final List<int> locationIds;
+  factory Customer.fromJson(Map<String, dynamic> j) => Customer(
+    id: int.parse(j['id'].toString()),
+    name: j['name'].toString(),
+    isActive: j['is_active']?.toString() != '0',
+    productIds: (j['product_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
+    locationIds: (j['location_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
+  );
 }
 
 // ── Vendor ───────────────────────────────────────────────────
 class Vendor {
   final int    id;
   final String name;
-  const Vendor({required this.id, required this.name});
-  factory Vendor.fromJson(Map<String, dynamic> j) =>
-      Vendor(id: int.parse(j['id'].toString()), name: j['name'].toString());
+  final bool   isActive;
+  final List<int> locationIds;
+  final List<int> productIds;
+  const Vendor({required this.id, required this.name, this.isActive = true, this.locationIds = const [], this.productIds = const []});
+  factory Vendor.fromJson(Map<String, dynamic> j) => Vendor(
+    id: int.parse(j['id'].toString()),
+    name: j['name'].toString(),
+    isActive: j['is_active']?.toString() != '0',
+    locationIds: (j['location_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
+    productIds: (j['product_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
+  );
 }
 
 // ── Product ─────────────────────────────────────────────────

@@ -47,7 +47,7 @@ class Dairy_Production_API {
     const PAGES_BASE = ['production', 'sales', 'reports'];
 
     // Pages requiring can_finance = true
-    const PAGES_FINANCE = ['stock_valuation', 'audit_log', 'vendor_ledger', 'funds_report'];
+    const PAGES_FINANCE = ['stock_valuation', 'audit_log', 'vendor_ledger', 'funds_report', 'admin'];
 
     // Pages requiring can_anomaly = true
     const PAGES_ANOMALY = ['anomalies'];
@@ -326,6 +326,28 @@ class Dairy_Production_API {
             $this->check_db('ensure_dahi_product.seed_vendor_location_access');
         }
 
+        // ── Vendor-Product mapping table ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_vendor_products (
+                id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                vendor_id   INT UNSIGNED NOT NULL,
+                product_id  INT UNSIGNED NOT NULL,
+                UNIQUE KEY uq_vend_prod (vendor_id, product_id),
+                KEY idx_vp_prod (product_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.vendor_products_table');
+
+        // Seed: if empty, assign all active vendors to FF Milk (product_id=1)
+        $vp_count = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_vendor_products");
+        if ($vp_count === 0) {
+            $db->query("
+                INSERT INTO wp_mf_3_dp_vendor_products (vendor_id, product_id)
+                SELECT id, 1 FROM wp_mf_3_dp_vendors WHERE is_active = 1
+            ");
+            $this->check_db('ensure_dahi_product.seed_vendor_products');
+        }
+
         // Fix culture/protein columns: INT → DECIMAL(10,2)
         $col_type = $db->get_var("
             SELECT DATA_TYPE FROM information_schema.COLUMNS
@@ -547,6 +569,90 @@ class Dairy_Production_API {
             $db->update('wp_mf_3_dp_production_flows', ['is_active' => 0], ['key' => 'dahi_processing']);
             $this->check_db('ensure_dahi_product.deactivate_dahi_flow');
         }
+
+        // Stock column order: Skim Milk, Curd, Ghee, Cream, Butter, FF Milk, SMP, Culture, Protein
+        $skim_sort = (int) $db->get_var("SELECT sort_order FROM wp_mf_3_dp_products WHERE id=2");
+        if ($skim_sort !== 1) {
+            $order = [2 => 1, 10 => 2, 5 => 3, 3 => 4, 4 => 5, 1 => 6, 7 => 7, 9 => 8, 8 => 9, 6 => 99];
+            foreach ($order as $pid => $sort) {
+                $db->update('wp_mf_3_dp_products', ['sort_order' => $sort], ['id' => $pid]);
+            }
+            $this->check_db('ensure_dahi_product.stock_column_order');
+        }
+
+        // ── Customer-Product mapping table ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_customer_products (
+                id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                customer_id INT UNSIGNED NOT NULL,
+                product_id  INT UNSIGNED NOT NULL,
+                UNIQUE KEY uq_cust_prod (customer_id, product_id),
+                KEY idx_cp_prod (product_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.customer_products_table');
+
+        // Migrate: parse product prefix from customer names, seed mappings, strip prefixes
+        $cp_count = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_customer_products");
+        if ($cp_count === 0) {
+            $prefix_map = [
+                'Skim-'    => 2,
+                'Curd-'    => 10,
+                'Ghee-'    => 5,
+                'Cream-'   => 3,
+                'Butter-'  => 4,
+                'FF Milk-' => 1,
+            ];
+            $custs = $db->get_results("SELECT id, name FROM wp_mf_3_dp_customers", ARRAY_A);
+            foreach ($custs as $c) {
+                $cid  = (int) $c['id'];
+                $name = $c['name'];
+                foreach ($prefix_map as $prefix => $pid) {
+                    if (str_starts_with($name, $prefix)) {
+                        $db->insert('wp_mf_3_dp_customer_products', [
+                            'customer_id' => $cid,
+                            'product_id'  => $pid,
+                        ]);
+                        $short = substr($name, strlen($prefix));
+                        // Only rename if no collision
+                        $dup = $db->get_var($db->prepare(
+                            "SELECT COUNT(*) FROM wp_mf_3_dp_customers WHERE name=%s AND id!=%d",
+                            $short, $cid));
+                        if (!$dup) {
+                            $db->update('wp_mf_3_dp_customers', ['name' => $short], ['id' => $cid]);
+                        }
+                        break;
+                    }
+                }
+            }
+            $this->check_db('ensure_dahi_product.customer_products_seed');
+        }
+
+        // ── Customer-Location mapping table ──
+        $db->query("
+            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_customer_location_access (
+                id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                customer_id INT UNSIGNED NOT NULL,
+                location_id INT UNSIGNED NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_cust_loc (customer_id, location_id),
+                KEY idx_cla_loc (location_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $this->check_db('ensure_dahi_product.customer_location_access_table');
+
+        // Seed: if empty, assign all active customers to all active locations
+        $cla_count = (int) $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_customer_location_access");
+        if ($cla_count === 0) {
+            $db->query("
+                INSERT INTO wp_mf_3_dp_customer_location_access (customer_id, location_id)
+                SELECT c.id, l.id
+                  FROM wp_mf_3_dp_customers c
+                  CROSS JOIN wp_mf_3_dp_locations l
+                 WHERE c.is_active = 1 AND l.is_active = 1
+            ");
+            $this->check_db('ensure_dahi_product.seed_customer_location_access');
+        }
     }
 
     public function register_routes(): void {
@@ -569,6 +675,12 @@ class Dairy_Production_API {
         $this->r('/dahi',              'POST', 'save_dahi',              $auth);
         $this->r('/smp-purchase',      'POST', 'save_smp_purchase',      $auth);
         $this->r('/customers',         'GET',  'get_customers',          $auth);
+        $this->r('/customers',         'POST', 'save_customer',           $auth);
+        $this->r('/customers/(?P<id>\\d+)', 'POST', 'update_customer',    $auth);
+        $this->r('/vendors',           'POST', 'save_vendor',             $auth);
+        $this->r('/vendors/(?P<id>\\d+)', 'POST', 'update_vendor',        $auth);
+        $this->r('/admin/products',    'GET',  'get_admin_products',      $auth);
+        $this->r('/admin/products/(?P<id>\\d+)', 'POST', 'update_product', $auth);
         $this->r('/vendors',           'GET',  'get_vendors',            $auth);
         $this->r('/sales',             'GET',  'get_sales',              $auth);
         $this->r('/sales-report',      'GET',  'get_sales_report',       $auth);
@@ -604,6 +716,8 @@ class Dairy_Production_API {
         $this->r('/curd-production',    'GET',  'get_curd_productions',    $auth);
         $this->r('/curd-production',    'POST', 'save_curd_production',    $auth);
         $this->r('/production-flows',   'GET',  'get_production_flows',    $auth);
+        $this->r('/cashflow-report',    'GET',  'get_cashflow_report',     $auth);
+        $this->r('/sales-ledger',       'GET',  'get_sales_ledger',        $auth);
     }
 
     private function r( string $path, string $method, string $cb, array $extra = [] ): void {
@@ -1062,33 +1176,231 @@ class Dairy_Production_API {
     // CUSTOMERS & VENDORS
     // ════════════════════════════════════════════════════
 
-    public function get_customers(): WP_REST_Response {
+    public function get_customers( WP_REST_Request $r ): WP_REST_Response {
         try {
-            $rows = $this->db()->get_results(
-                "SELECT id, name FROM wp_mf_3_dp_customers WHERE is_active=1 ORDER BY name",
-                ARRAY_A
-            );
+            $db   = $this->db();
+            $pid  = (int) ($r->get_param('product_id') ?? 0);
+            $all  = (int) ($r->get_param('all') ?? 0);  // include inactive for admin
+            $active_clause = $all ? '' : 'AND c.is_active=1';
+            if ($pid) {
+                $rows = $db->get_results($db->prepare(
+                    "SELECT c.id, c.name, c.is_active
+                       FROM wp_mf_3_dp_customers c
+                       JOIN wp_mf_3_dp_customer_products cp ON cp.customer_id = c.id
+                      WHERE cp.product_id=%d $active_clause
+                      ORDER BY c.name", $pid), ARRAY_A);
+            } else {
+                $where = $all ? '1=1' : 'is_active=1';
+                $rows = $db->get_results(
+                    "SELECT id, name, is_active FROM wp_mf_3_dp_customers WHERE $where ORDER BY name",
+                    ARRAY_A);
+            }
             $this->check_db('get_customers');
+            // Attach product_ids and location_ids to each customer
+            $all_cp = $db->get_results("SELECT customer_id, product_id FROM wp_mf_3_dp_customer_products", ARRAY_A);
+            $cp_map = [];
+            foreach ($all_cp as $cp) { $cp_map[(int)$cp['customer_id']][] = (int)$cp['product_id']; }
+            $all_cl = $db->get_results("SELECT customer_id, location_id FROM wp_mf_3_dp_customer_location_access", ARRAY_A);
+            $cl_map = [];
+            foreach ($all_cl as $cl) { $cl_map[(int)$cl['customer_id']][] = (int)$cl['location_id']; }
+            foreach ($rows as &$row) {
+                $row['product_ids']  = $cp_map[(int)$row['id']] ?? [];
+                $row['location_ids'] = $cl_map[(int)$row['id']] ?? [];
+            }
             return $this->ok($rows ?? []);
         } catch (\Exception $e) { return $this->exc('get_customers', $e); }
+    }
+
+    public function save_customer( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db   = $this->db();
+            $name = trim($r->get_param('name') ?? '');
+            $pids = $r->get_param('product_ids') ?? [];
+            $lids = $r->get_param('location_ids') ?? [];
+            if (!$name) return $this->err('Name is required.');
+            if (empty($pids) || !is_array($pids)) return $this->err('At least one product is required.');
+            $dup = $db->get_var($db->prepare("SELECT COUNT(*) FROM wp_mf_3_dp_customers WHERE name=%s", $name));
+            if ($dup) return $this->err('Customer name already exists.');
+            $db->insert('wp_mf_3_dp_customers', ['name' => $name, 'is_active' => 1]);
+            if ($db->insert_id === 0) { $this->log_db('save_customer', $db->last_error); return $this->err('Database error.', 500); }
+            $cid = $db->insert_id;
+            foreach ($pids as $pid) { $db->insert('wp_mf_3_dp_customer_products', ['customer_id' => $cid, 'product_id' => (int)$pid]); }
+            if (!empty($lids) && is_array($lids)) {
+                foreach ($lids as $lid) { $db->insert('wp_mf_3_dp_customer_location_access', ['customer_id' => $cid, 'location_id' => (int)$lid]); }
+            }
+            $this->audit('wp_mf_3_dp_customers', $cid, 'INSERT', null, ['name' => $name, 'product_ids' => $pids, 'location_ids' => $lids]);
+            return $this->ok(['id' => $cid], 201);
+        } catch (\Exception $e) { return $this->exc('save_customer', $e); }
+    }
+
+    public function update_customer( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db     = $this->db();
+            $cid    = (int) $r['id'];
+            $name   = trim($r->get_param('name') ?? '');
+            $pids   = $r->get_param('product_ids');
+            $lids   = $r->get_param('location_ids');
+            $active = $r->get_param('is_active');
+            if (!$cid) return $this->err('id is required.');
+            $old = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_customers WHERE id=%d", $cid), ARRAY_A);
+            if (!$old) return $this->err('Customer not found.', 404);
+            $updates = [];
+            if ($name && $name !== $old['name']) {
+                $dup = $db->get_var($db->prepare("SELECT COUNT(*) FROM wp_mf_3_dp_customers WHERE name=%s AND id!=%d", $name, $cid));
+                if ($dup) return $this->err('Customer name already exists.');
+                $updates['name'] = $name;
+            }
+            if ($active !== null) { $updates['is_active'] = (int)$active; }
+            if (!empty($updates)) { $db->update('wp_mf_3_dp_customers', $updates, ['id' => $cid]); $this->check_db('update_customer'); }
+            if ($pids !== null && is_array($pids)) {
+                $db->delete('wp_mf_3_dp_customer_products', ['customer_id' => $cid]);
+                foreach ($pids as $pid) { $db->insert('wp_mf_3_dp_customer_products', ['customer_id' => $cid, 'product_id' => (int)$pid]); }
+            }
+            if ($lids !== null && is_array($lids)) {
+                $db->delete('wp_mf_3_dp_customer_location_access', ['customer_id' => $cid]);
+                foreach ($lids as $lid) { $db->insert('wp_mf_3_dp_customer_location_access', ['customer_id' => $cid, 'location_id' => (int)$lid]); }
+            }
+            $after = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_customers WHERE id=%d", $cid), ARRAY_A);
+            $this->audit('wp_mf_3_dp_customers', $cid, 'UPDATE', $old, $after);
+            return $this->ok(['id' => $cid]);
+        } catch (\Exception $e) { return $this->exc('update_customer', $e); }
     }
 
     public function get_vendors( WP_REST_Request $r ): WP_REST_Response {
         try {
             $db     = $this->db();
             $loc_id = (int) ($r->get_param('location_id') ?? 0);
-            if ($loc_id) {
+            $all    = (int) ($r->get_param('all') ?? 0);
+            if ($loc_id && !$all) {
                 $rows = $db->get_results($db->prepare(
-                    "SELECT v.id, v.name FROM wp_mf_3_dp_vendors v
+                    "SELECT v.id, v.name, v.is_active FROM wp_mf_3_dp_vendors v
                      JOIN wp_mf_3_dp_vendor_location_access vla ON vla.vendor_id = v.id
                      WHERE v.is_active=1 AND vla.location_id = %d ORDER BY v.name", $loc_id), ARRAY_A);
             } else {
-                $rows = $db->get_results(
-                    "SELECT id, name FROM wp_mf_3_dp_vendors WHERE is_active=1 ORDER BY name", ARRAY_A);
+                $where = $all ? '1=1' : 'is_active=1';
+                $rows = $db->get_results("SELECT id, name, is_active FROM wp_mf_3_dp_vendors WHERE $where ORDER BY name", ARRAY_A);
             }
             $this->check_db('get_vendors');
+            // Attach location_ids
+            $all_vl = $db->get_results("SELECT vendor_id, location_id FROM wp_mf_3_dp_vendor_location_access", ARRAY_A);
+            $vl_map = [];
+            foreach ($all_vl as $vl) { $vl_map[(int)$vl['vendor_id']][] = (int)$vl['location_id']; }
+            // Attach product_ids
+            $all_vp = $db->get_results("SELECT vendor_id, product_id FROM wp_mf_3_dp_vendor_products", ARRAY_A);
+            $vp_map = [];
+            foreach ($all_vp as $vp) { $vp_map[(int)$vp['vendor_id']][] = (int)$vp['product_id']; }
+            foreach ($rows as &$row) {
+                $row['location_ids'] = $vl_map[(int)$row['id']] ?? [];
+                $row['product_ids']  = $vp_map[(int)$row['id']] ?? [];
+            }
             return $this->ok($rows ?? []);
         } catch (\Exception $e) { return $this->exc('get_vendors', $e); }
+    }
+
+    public function save_vendor( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db   = $this->db();
+            $name = trim($r->get_param('name') ?? '');
+            $lids = $r->get_param('location_ids') ?? [];
+            if (!$name) return $this->err('Name is required.');
+            $dup = $db->get_var($db->prepare("SELECT COUNT(*) FROM wp_mf_3_dp_vendors WHERE name=%s", $name));
+            if ($dup) return $this->err('Vendor name already exists.');
+            $pids = $r->get_param('product_ids') ?? [];
+            $db->insert('wp_mf_3_dp_vendors', ['name' => $name, 'is_active' => 1]);
+            if ($db->insert_id === 0) { $this->log_db('save_vendor', $db->last_error); return $this->err('Database error.', 500); }
+            $vid = $db->insert_id;
+            if (!empty($lids) && is_array($lids)) {
+                foreach ($lids as $lid) { $db->insert('wp_mf_3_dp_vendor_location_access', ['vendor_id' => $vid, 'location_id' => (int)$lid]); }
+            }
+            if (!empty($pids) && is_array($pids)) {
+                foreach ($pids as $pid) { $db->insert('wp_mf_3_dp_vendor_products', ['vendor_id' => $vid, 'product_id' => (int)$pid]); }
+            }
+            $this->audit('wp_mf_3_dp_vendors', $vid, 'INSERT', null, ['name' => $name, 'location_ids' => $lids, 'product_ids' => $pids]);
+            return $this->ok(['id' => $vid], 201);
+        } catch (\Exception $e) { return $this->exc('save_vendor', $e); }
+    }
+
+    public function update_vendor( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db     = $this->db();
+            $vid    = (int) $r['id'];
+            $name   = trim($r->get_param('name') ?? '');
+            $lids   = $r->get_param('location_ids');
+            $active = $r->get_param('is_active');
+            if (!$vid) return $this->err('id is required.');
+            $old = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_vendors WHERE id=%d", $vid), ARRAY_A);
+            if (!$old) return $this->err('Vendor not found.', 404);
+            $updates = [];
+            if ($name && $name !== $old['name']) {
+                $dup = $db->get_var($db->prepare("SELECT COUNT(*) FROM wp_mf_3_dp_vendors WHERE name=%s AND id!=%d", $name, $vid));
+                if ($dup) return $this->err('Vendor name already exists.');
+                $updates['name'] = $name;
+            }
+            if ($active !== null) { $updates['is_active'] = (int)$active; }
+            if (!empty($updates)) { $db->update('wp_mf_3_dp_vendors', $updates, ['id' => $vid]); $this->check_db('update_vendor'); }
+            if ($lids !== null && is_array($lids)) {
+                $db->delete('wp_mf_3_dp_vendor_location_access', ['vendor_id' => $vid]);
+                foreach ($lids as $lid) { $db->insert('wp_mf_3_dp_vendor_location_access', ['vendor_id' => $vid, 'location_id' => (int)$lid]); }
+            }
+            $pids = $r->get_param('product_ids');
+            if ($pids !== null && is_array($pids)) {
+                $db->delete('wp_mf_3_dp_vendor_products', ['vendor_id' => $vid]);
+                foreach ($pids as $pid) { $db->insert('wp_mf_3_dp_vendor_products', ['vendor_id' => $vid, 'product_id' => (int)$pid]); }
+            }
+            $after = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_vendors WHERE id=%d", $vid), ARRAY_A);
+            $this->audit('wp_mf_3_dp_vendors', $vid, 'UPDATE', $old, $after);
+            return $this->ok(['id' => $vid]);
+        } catch (\Exception $e) { return $this->exc('update_vendor', $e); }
+    }
+
+    public function get_admin_products(): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db = $this->db();
+            $rows = $db->get_results(
+                "SELECT p.id, p.name, p.unit, p.sort_order, p.is_active,
+                        COALESCE(er.rate, 0) AS rate
+                   FROM wp_mf_3_dp_products p
+                   LEFT JOIN wp_mf_3_dp_estimated_rates er ON er.product_id = p.id
+                  ORDER BY p.sort_order", ARRAY_A);
+            $this->check_db('get_admin_products');
+            return $this->ok($rows ?? []);
+        } catch (\Exception $e) { return $this->exc('get_admin_products', $e); }
+    }
+
+    public function update_product( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db   = $this->db();
+            $pid  = (int) $r['id'];
+            $name = trim($r->get_param('name') ?? '');
+            $unit = trim($r->get_param('unit') ?? '');
+            $rate = $r->get_param('rate');
+            $active = $r->get_param('is_active');
+            if (!$pid) return $this->err('id is required.');
+            $old = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_products WHERE id=%d", $pid), ARRAY_A);
+            if (!$old) return $this->err('Product not found.', 404);
+            $updates = [];
+            if ($name && $name !== $old['name']) { $updates['name'] = $name; }
+            if ($unit && $unit !== $old['unit']) { $updates['unit'] = $unit; }
+            if ($active !== null) { $updates['is_active'] = (int)$active; }
+            if (!empty($updates)) { $db->update('wp_mf_3_dp_products', $updates, ['id' => $pid]); $this->check_db('update_product'); }
+            if ($rate !== null) {
+                $db->query($db->prepare(
+                    "INSERT INTO wp_mf_3_dp_estimated_rates (product_id, rate, updated_by)
+                     VALUES (%d, %f, %d)
+                     ON DUPLICATE KEY UPDATE rate=VALUES(rate), updated_by=VALUES(updated_by)",
+                    $pid, (float)$rate, $this->uid()));
+                $this->check_db('update_product.rate');
+            }
+            $after = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_products WHERE id=%d", $pid), ARRAY_A);
+            $this->audit('wp_mf_3_dp_products', $pid, 'UPDATE', $old, $after);
+            return $this->ok(['id' => $pid]);
+        } catch (\Exception $e) { return $this->exc('update_product', $e); }
     }
 
     // ════════════════════════════════════════════════════
@@ -1104,7 +1416,7 @@ class Dairy_Production_API {
             $dt  = $r['entry_date'];
             // Return sellable products for dropdown (exclude raw inputs and Dahi)
             $products = $db->get_results(
-                "SELECT id, name, unit FROM wp_mf_3_dp_products WHERE is_active=1 AND id NOT IN (1,6,7,8,9) ORDER BY sort_order", ARRAY_A);
+                "SELECT id, name, unit FROM wp_mf_3_dp_products WHERE is_active=1 AND id NOT IN (6,7,8,9) ORDER BY sort_order", ARRAY_A);
             $this->check_db('get_sales.products');
             $entries = $db->get_results($db->prepare(
                 "SELECT s.id, s.product_id, p.name AS product_name,
@@ -1152,6 +1464,32 @@ class Dairy_Production_API {
                 $customer_id
             ));
             if (!$cust_name) return $this->err('Customer not found.');
+            // Check for existing row (UNIQUE on location_id, product_id, entry_date, customer_id)
+            $existing = $db->get_row($db->prepare(
+                "SELECT * FROM wp_mf_3_dp_sales WHERE location_id=%d AND product_id=%d AND entry_date=%s AND customer_id=%d",
+                $loc, $pid, $dt, $customer_id
+            ), ARRAY_A);
+
+            if ($existing) {
+                // Update: add qty, use new rate
+                $old_qty  = (int) $existing['quantity_kg'];
+                $new_qty  = $old_qty + $qty;
+                $new_rate = $rate;
+                $id       = (int) $existing['id'];
+                $result   = $db->update('wp_mf_3_dp_sales', [
+                    'quantity_kg' => $new_qty,
+                    'rate'        => $new_rate,
+                    'updated_by'  => $this->uid(),
+                ], ['id' => $id]);
+                if ($result === false) {
+                    $this->log_db('save_sale.update', $db->last_error);
+                    return $this->err('Database error updating sale.', 500);
+                }
+                $after = $db->get_row($db->prepare("SELECT * FROM wp_mf_3_dp_sales WHERE id=%d", $id), ARRAY_A);
+                $this->audit('wp_mf_3_dp_sales', $id, 'UPDATE', $existing, $after, $loc);
+                return $this->ok(['id' => $id, 'merged' => true], 200);
+            }
+
             $data = [
                 'location_id'   => $loc,
                 'product_id'    => $pid,
@@ -1202,8 +1540,8 @@ class Dairy_Production_API {
             $from = $r['from'] ?? date('Y-m-d', strtotime('-29 days'));
             $to   = $r['to']   ?? date('Y-m-d');
 
-            // Column order requested: Skim Milk, Ghee, Butter, Cream, FF Milk
-            $col_order = [2, 5, 4, 3, 1];
+            // Column order: Skim Milk, Curd, Ghee, Butter, Cream, FF Milk
+            $col_order = [2, 10, 5, 4, 3, 1];
 
             // Fetch product names for the ordered columns
             $all_products = $db->get_results(
@@ -1780,62 +2118,80 @@ class Dairy_Production_API {
         if ($e = $this->check_finance_access($this->uid())) return $e;
         try {
             $db        = $this->db();
-            $vendor_id = (int) $r->get_param('vendor_id');
-            if (!$vendor_id) return $this->err('vendor_id is required.');
-
-            $vendor = $db->get_row($db->prepare(
-                "SELECT id, name FROM wp_mf_3_dp_vendors WHERE id=%d", $vendor_id), ARRAY_A);
-            $this->check_db('vendor_ledger_detail.vendor_check');
-            if (!$vendor) return $this->err('Vendor not found.', 404);
+            $vendor_id = (int) ($r->get_param('vendor_id') ?? 0);
 
             $from   = sanitize_text_field($r->get_param('from') ?? date('Y-m-d', strtotime('-90 days')));
             $to     = sanitize_text_field($r->get_param('to')   ?? date('Y-m-d'));
             $loc_id = (int) ($r->get_param('location_id') ?? 0);
+
+            // vendor_id=0 means all vendors
+            $vendor_name = 'All Vendors';
+            if ($vendor_id) {
+                $vendor = $db->get_row($db->prepare(
+                    "SELECT id, name FROM wp_mf_3_dp_vendors WHERE id=%d", $vendor_id), ARRAY_A);
+                $this->check_db('vendor_ledger_detail.vendor_check');
+                if (!$vendor) return $this->err('Vendor not found.', 404);
+                $vendor_name = $vendor['name'];
+            }
+
+            // Build vendor filter
+            $vend_m = $vendor_id ? $db->prepare(" AND m.vendor_id = %d", $vendor_id) : '';
+            $vend_c = $vendor_id ? $db->prepare(" AND c.vendor_id = %d", $vendor_id) : '';
+            $vend_b = $vendor_id ? $db->prepare(" AND b.vendor_id = %d", $vendor_id) : '';
+            $vend_p = $vendor_id ? $db->prepare(" AND vendor_id = %d", $vendor_id) : '';
 
             // Optional location filter for purchase transactions
             $loc_where_m = $loc_id ? $db->prepare(" AND m.location_id = %d", $loc_id) : '';
             $loc_where_c = $loc_id ? $db->prepare(" AND c.location_id = %d", $loc_id) : '';
             $loc_where_b = $loc_id ? $db->prepare(" AND b.location_id = %d", $loc_id) : '';
 
-            // Purchase transactions
+            // Purchase transactions — include vendor_name
             $purchases = $db->get_results($db->prepare("
-                SELECT 'purchase' AS type, m.entry_date AS date, 'FF Milk' AS product,
+                SELECT 'purchase' AS type, m.entry_date AS date, v.name AS vendor_name,
+                       'FF Milk' AS product,
                        m.input_ff_milk_kg AS quantity, m.input_rate AS rate,
                        ROUND(m.input_ff_milk_kg * m.input_rate, 2) AS amount,
                        l.name AS location_name
                   FROM wp_mf_3_dp_milk_cream_production m
                   JOIN wp_mf_3_dp_locations l ON l.id = m.location_id
-                 WHERE m.vendor_id = %d AND m.input_ff_milk_kg > 0
-                   AND m.entry_date BETWEEN %s AND %s $loc_where_m
+                  LEFT JOIN wp_mf_3_dp_vendors v ON v.id = m.vendor_id
+                 WHERE m.input_ff_milk_kg > 0
+                   AND m.entry_date BETWEEN %s AND %s $vend_m $loc_where_m
                 UNION ALL
-                SELECT 'purchase' AS type, c.entry_date AS date, 'Cream' AS product,
+                SELECT 'purchase' AS type, c.entry_date AS date, v.name AS vendor_name,
+                       'Cream' AS product,
                        c.input_cream_kg AS quantity, c.input_rate AS rate,
                        ROUND(c.input_cream_kg * c.input_rate, 2) AS amount,
                        l.name AS location_name
                   FROM wp_mf_3_dp_cream_butter_ghee c
                   JOIN wp_mf_3_dp_locations l ON l.id = c.location_id
-                 WHERE c.vendor_id = %d AND c.input_cream_kg > 0
-                   AND c.entry_date BETWEEN %s AND %s $loc_where_c
+                  LEFT JOIN wp_mf_3_dp_vendors v ON v.id = c.vendor_id
+                 WHERE c.input_cream_kg > 0
+                   AND c.entry_date BETWEEN %s AND %s $vend_c $loc_where_c
                 UNION ALL
-                SELECT 'purchase' AS type, b.entry_date AS date, 'Butter' AS product,
+                SELECT 'purchase' AS type, b.entry_date AS date, v.name AS vendor_name,
+                       'Butter' AS product,
                        b.input_butter_kg AS quantity, b.input_rate AS rate,
                        ROUND(b.input_butter_kg * b.input_rate, 2) AS amount,
                        l.name AS location_name
                   FROM wp_mf_3_dp_butter_ghee b
                   JOIN wp_mf_3_dp_locations l ON l.id = b.location_id
-                 WHERE b.vendor_id = %d AND b.input_butter_kg > 0
-                   AND b.entry_date BETWEEN %s AND %s $loc_where_b
+                  LEFT JOIN wp_mf_3_dp_vendors v ON v.id = b.vendor_id
+                 WHERE b.input_butter_kg > 0
+                   AND b.entry_date BETWEEN %s AND %s $vend_b $loc_where_b
                 ORDER BY date DESC
-            ", $vendor_id, $from, $to, $vendor_id, $from, $to, $vendor_id, $from, $to), ARRAY_A);
+            ", $from, $to, $from, $to, $from, $to), ARRAY_A);
             $this->check_db('vendor_ledger_detail.purchases');
 
-            // Payment transactions
+            // Payment transactions — include vendor_name
             $payment_rows = $db->get_results($db->prepare("
-                SELECT 'payment' AS type, payment_date AS date, amount, method, note, created_by
-                  FROM wp_mf_3_dp_vendor_payments
-                 WHERE vendor_id = %d AND payment_date BETWEEN %s AND %s
-                 ORDER BY payment_date DESC
-            ", $vendor_id, $from, $to), ARRAY_A);
+                SELECT 'payment' AS type, p.payment_date AS date, p.amount, p.method, p.note,
+                       p.created_by, v.name AS vendor_name
+                  FROM wp_mf_3_dp_vendor_payments p
+                  LEFT JOIN wp_mf_3_dp_vendors v ON v.id = p.vendor_id
+                 WHERE p.payment_date BETWEEN %s AND %s $vend_p
+                 ORDER BY p.payment_date DESC
+            ", $from, $to), ARRAY_A);
             $this->check_db('vendor_ledger_detail.payments');
 
             // Resolve user names for payments
@@ -1858,12 +2214,19 @@ class Dairy_Production_API {
             foreach ($purchases as $p) $total_purchases += (float) $p['amount'];
             foreach ($payment_rows as $p) $total_payments += $p['amount'];
 
+            // Vendors list for dropdown (only those with activity)
+            $vendor_list = $db->get_results("
+                SELECT DISTINCT v.id, v.name FROM wp_mf_3_dp_vendors v
+                WHERE v.is_active = 1 ORDER BY v.name", ARRAY_A);
+            $this->check_db('vendor_ledger_detail.vendor_list');
+
             return $this->ok([
-                'vendor_name'     => $vendor['name'],
+                'vendor_name'     => $vendor_name,
                 'total_purchases' => round($total_purchases, 2),
                 'total_payments'  => round($total_payments, 2),
                 'balance_due'     => round($total_purchases - $total_payments, 2),
                 'transactions'    => $all,
+                'vendors'         => $vendor_list ?? [],
                 'from'            => $from,
                 'to'              => $to,
             ]);
@@ -2430,6 +2793,164 @@ class Dairy_Production_API {
     }
 
     // ════════════════════════════════════════════════════
+    // CASH FLOW REPORT
+    // ════════════════════════════════════════════════════
+
+    public function get_cashflow_report( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_finance_access($this->uid())) return $e;
+        try {
+            $db   = $this->db();
+            $from = $r->get_param('from') ?: date('Y-m-d', strtotime('-29 days'));
+            $to   = $r->get_param('to')   ?: date('Y-m-d');
+            $loc  = (int) ($r->get_param('location_id') ?? 0);
+            $loc_cond   = $loc ? $db->prepare(' AND location_id = %d', $loc) : '';
+
+            // ── Sales per day (includes madhusudan) ──
+            $sales_q = "SELECT entry_date AS d, ROUND(SUM(quantity_kg * rate), 2) AS amt
+                          FROM wp_mf_3_dp_sales
+                         WHERE entry_date BETWEEN %s AND %s $loc_cond
+                         GROUP BY entry_date";
+            $sales = $db->get_results($db->prepare($sales_q, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.sales');
+
+            $mad_q = "SELECT entry_date AS d, ROUND(SUM(total_ff_milk_kg * sale_rate), 2) AS amt
+                        FROM wp_mf_3_dp_madhusudan_sale
+                       WHERE entry_date BETWEEN %s AND %s $loc_cond
+                       GROUP BY entry_date";
+            $mad = $db->get_results($db->prepare($mad_q, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.madhusudan');
+
+            // ── Purchases per day (FF Milk + Cream + Butter + Ingredients) ──
+            $purch_ff = "SELECT entry_date AS d, ROUND(SUM(input_ff_milk_kg * input_rate), 2) AS amt
+                           FROM wp_mf_3_dp_milk_cream_production
+                          WHERE input_ff_milk_kg > 0 AND entry_date BETWEEN %s AND %s $loc_cond
+                          GROUP BY entry_date";
+            $pff = $db->get_results($db->prepare($purch_ff, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.purch_ff');
+
+            $purch_cr = "SELECT entry_date AS d, ROUND(SUM(input_cream_kg * input_rate), 2) AS amt
+                           FROM wp_mf_3_dp_cream_butter_ghee
+                          WHERE input_cream_kg > 0 AND entry_date BETWEEN %s AND %s $loc_cond
+                          GROUP BY entry_date";
+            $pcr = $db->get_results($db->prepare($purch_cr, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.purch_cr');
+
+            $purch_bt = "SELECT entry_date AS d, ROUND(SUM(input_butter_kg * input_rate), 2) AS amt
+                           FROM wp_mf_3_dp_butter_ghee
+                          WHERE input_butter_kg > 0 AND entry_date BETWEEN %s AND %s $loc_cond
+                          GROUP BY entry_date";
+            $pbt = $db->get_results($db->prepare($purch_bt, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.purch_bt');
+
+            $purch_in = "SELECT entry_date AS d, ROUND(SUM(quantity * rate), 2) AS amt
+                           FROM wp_mf_3_dp_ingredient_purchase
+                          WHERE entry_date BETWEEN %s AND %s $loc_cond
+                          GROUP BY entry_date";
+            $pin = $db->get_results($db->prepare($purch_in, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.purch_in');
+
+            // ── Vendor payments per day ──
+            $pay_cond = $loc ? '' : ''; // payments are global, not per-location
+            $pay_q = "SELECT payment_date AS d, ROUND(SUM(amount), 2) AS amt
+                        FROM wp_mf_3_dp_vendor_payments
+                       WHERE payment_date BETWEEN %s AND %s
+                       GROUP BY payment_date";
+            $pay = $db->get_results($db->prepare($pay_q, $from, $to), ARRAY_A);
+            $this->check_db('cashflow.payments');
+
+            // ── Merge into daily map ──
+            $days = [];
+            $cur = new \DateTime($from);
+            $end = new \DateTime($to);
+            while ($cur <= $end) {
+                $days[$cur->format('Y-m-d')] = ['sales' => 0, 'purchases' => 0, 'payments' => 0];
+                $cur->modify('+1 day');
+            }
+            foreach ($sales as $r2) { $days[$r2['d']]['sales'] += (float)$r2['amt']; }
+            foreach ($mad   as $r2) { $days[$r2['d']]['sales'] += (float)$r2['amt']; }
+            foreach ($pff   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
+            foreach ($pcr   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
+            foreach ($pbt   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
+            foreach ($pin   as $r2) { $days[$r2['d']]['purchases'] += (float)$r2['amt']; }
+            foreach ($pay   as $r2) { $days[$r2['d']]['payments']  += (float)$r2['amt']; }
+
+            // ── Build rows with beginning/end cash ──
+            $rows = [];
+            $cash = 0; // beginning cash starts at 0
+            foreach ($days as $date => $v) {
+                $beg = round($cash, 2);
+                $end_cash = round($beg + $v['sales'] - $v['payments'], 2);
+                $rows[] = [
+                    'date'           => $date,
+                    'beginning_cash' => $beg,
+                    'sales'          => round($v['sales'], 2),
+                    'purchases'      => round($v['purchases'], 2),
+                    'payments'       => round($v['payments'], 2),
+                    'end_cash'       => $end_cash,
+                ];
+                $cash = $end_cash;
+            }
+
+            return $this->ok([
+                'from' => $from,
+                'to'   => $to,
+                'rows' => $rows,
+            ]);
+        } catch (\Exception $e) { return $this->exc('get_cashflow_report', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
+    // SALES LEDGER (flat transaction list with customer filter)
+    // ════════════════════════════════════════════════════
+
+    public function get_sales_ledger( WP_REST_Request $r ): WP_REST_Response {
+        if ($e = $this->check_location_access($this->uid(), (int)$r['location_id'])) return $e;
+        try {
+            $db   = $this->db();
+            $loc  = (int) $r['location_id'];
+            $from = $r->get_param('from') ?: date('Y-m-d', strtotime('-29 days'));
+            $to   = $r->get_param('to')   ?: date('Y-m-d');
+            $cid  = (int) ($r->get_param('customer_id') ?? 0);
+
+            $cust_cond = $cid ? $db->prepare(' AND s.customer_id = %d', $cid) : '';
+
+            $rows = $db->get_results($db->prepare(
+                "SELECT s.id, s.entry_date, c.name AS customer_name,
+                        p.name AS product_name, p.unit,
+                        s.quantity_kg, s.rate,
+                        ROUND(s.quantity_kg * s.rate, 2) AS total
+                   FROM wp_mf_3_dp_sales s
+                   JOIN wp_mf_3_dp_customers c ON c.id = s.customer_id
+                   JOIN wp_mf_3_dp_products p ON p.id = s.product_id
+                  WHERE s.location_id = %d
+                    AND s.entry_date BETWEEN %s AND %s
+                    $cust_cond
+                  ORDER BY s.entry_date DESC, c.name, p.name",
+                $loc, $from, $to
+            ), ARRAY_A);
+            $this->check_db('get_sales_ledger');
+
+            // ── Customers list for dropdown ──
+            $customers = $db->get_results($db->prepare(
+                "SELECT DISTINCT c.id, c.name
+                   FROM wp_mf_3_dp_sales s
+                   JOIN wp_mf_3_dp_customers c ON c.id = s.customer_id
+                  WHERE s.location_id = %d AND s.entry_date BETWEEN %s AND %s
+                  ORDER BY c.name",
+                $loc, $from, $to
+            ), ARRAY_A);
+            $this->check_db('get_sales_ledger.customers');
+
+            return $this->ok([
+                'from'      => $from,
+                'to'        => $to,
+                'rows'      => $rows ?? [],
+                'customers' => $customers ?? [],
+            ]);
+        } catch (\Exception $e) { return $this->exc('get_sales_ledger', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
     // AUDIT WRITER
     // ════════════════════════════════════════════════════
 
@@ -2494,10 +3015,18 @@ class Dairy_Production_API {
         try {
             $db   = $this->db();
             $loc  = (int) $r['location_id'];
-            $days = (int) get_option('dairy_transaction_days', 7);
-            $days = max(1, min(90, $days));
-            $from = date('Y-m-d', strtotime("-{$days} days"));
-            $to   = date('Y-m-d');
+            // Optional single-date filter for Production page inline entries
+            $single_date = $r->get_param('entry_date');
+            if ($single_date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $single_date)) {
+                $from = $single_date;
+                $to   = $single_date;
+                $days = 1;
+            } else {
+                $days = (int) get_option('dairy_transaction_days', 7);
+                $days = max(1, min(90, $days));
+                $from = date('Y-m-d', strtotime("-{$days} days"));
+                $to   = date('Y-m-d');
+            }
             $this->log("prod_tx START: loc=$loc days=$days from=$from to=$to");
 
             // ── FF Milk Purchase & Processing ──────────────────────
@@ -2589,13 +3118,39 @@ class Dairy_Production_API {
             // ── Pouch Production ─────────────────────────────────
             $pouch = $db->get_results($db->prepare(
                 "SELECT pp.id, pp.entry_date, pp.created_at, pp.created_by,
-                        pp.output_cream_kg, pp.output_cream_fat
+                        pp.output_cream_kg, pp.output_cream_fat,
+                        COALESCE((SELECT SUM(mu.ff_milk_kg) FROM wp_mf_3_dp_milk_usage mu
+                                  WHERE mu.flow_type='pouch' AND mu.flow_id=pp.id), 0) AS total_ff_milk_kg
                    FROM wp_mf_3_dp_pouch_production pp
                   WHERE pp.location_id = %d AND pp.entry_date BETWEEN %s AND %s
                   ORDER BY pp.entry_date DESC, pp.created_at DESC",
                 $loc, $from, $to
             ), ARRAY_A);
             $this->check_db('prod_tx.pouch');
+
+            // ── Curd Production ──────────────────────────────────────
+            $curd = $db->get_results($db->prepare(
+                "SELECT cp.id, cp.entry_date, cp.created_at, cp.created_by,
+                        cp.output_cream_kg, cp.output_cream_fat, cp.output_curd_matka,
+                        COALESCE((SELECT SUM(mu.ff_milk_kg) FROM wp_mf_3_dp_milk_usage mu
+                                  WHERE mu.flow_type='curd' AND mu.flow_id=cp.id), 0) AS total_ff_milk_kg
+                   FROM wp_mf_3_dp_curd_production cp
+                  WHERE cp.location_id = %d AND cp.entry_date BETWEEN %s AND %s
+                  ORDER BY cp.entry_date DESC, cp.created_at DESC",
+                $loc, $from, $to
+            ), ARRAY_A);
+            $this->check_db('prod_tx.curd');
+
+            // ── Madhusudan Sale ──────────────────────────────────────
+            $madhusudan = $db->get_results($db->prepare(
+                "SELECT ms.id, ms.entry_date, ms.created_at, ms.created_by,
+                        ms.total_ff_milk_kg, ms.sale_rate
+                   FROM wp_mf_3_dp_madhusudan_sale ms
+                  WHERE ms.location_id = %d AND ms.entry_date BETWEEN %s AND %s
+                  ORDER BY ms.entry_date DESC, ms.created_at DESC",
+                $loc, $from, $to
+            ), ARRAY_A);
+            $this->check_db('prod_tx.madhusudan');
 
             // ── Resolve user first names ───────────────────────────
             $user_ids = array_unique(array_filter(array_merge(
@@ -2605,6 +3160,8 @@ class Dairy_Production_API {
                 array_column($dahi,        'created_by'),
                 array_column($ingredients, 'created_by'),
                 array_column($pouch,       'created_by'),
+                array_column($curd ?? [],  'created_by'),
+                array_column($madhusudan ?? [], 'created_by'),
             )));
             $names = $this->resolve_first_names($user_ids);
 
@@ -2649,6 +3206,18 @@ class Dairy_Production_API {
             foreach ($pouch as $row) {
                 $rows[] = array_merge($row, [
                     'type'      => 'Pouch Production',
+                    'user_name' => $names[$row['created_by']] ?? 'Unknown',
+                ]);
+            }
+            foreach ($curd ?? [] as $row) {
+                $rows[] = array_merge($row, [
+                    'type'      => 'Curd Production',
+                    'user_name' => $names[$row['created_by']] ?? 'Unknown',
+                ]);
+            }
+            foreach ($madhusudan ?? [] as $row) {
+                $rows[] = array_merge($row, [
+                    'type'      => 'Madhusudan Sale',
                     'user_name' => $names[$row['created_by']] ?? 'Unknown',
                 ]);
             }

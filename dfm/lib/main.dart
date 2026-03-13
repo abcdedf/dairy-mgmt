@@ -18,6 +18,7 @@ import 'controllers/production_controller.dart';
 import 'pages/shared_widgets.dart';
 import 'pages/help_page.dart';
 import 'pages/anomaly_page.dart';
+import 'pages/admin_menu_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -125,6 +126,13 @@ const List<_PageDef> _allPages = [
     label:      'Anomalies',
     icon:       Icons.warning_amber_outlined,
     activeIcon: Icons.warning_amber,
+  ),
+  _PageDef(
+    key:        'admin',
+    page:       MobileFormFactor(child: AdminMenuPage()),
+    label:      'Admin',
+    icon:       Icons.settings_outlined,
+    activeIcon: Icons.settings,
   ),
 ];
 

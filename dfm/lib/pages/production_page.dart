@@ -135,6 +135,11 @@ class _ProductionBody extends StatelessWidget {
                 ),
               )),
 
+              const SizedBox(height: 16),
+
+              // ── Saved entries for this date + flow ───────────
+              _SavedEntries(ctrl: ctrl),
+
               const SizedBox(height: 32),
             ],
           ),
@@ -405,6 +410,78 @@ class _EntryForm extends StatelessWidget {
           const SizedBox(height: 10),
           IntField(ctrl.dahiOutCtrl, 'Dahi Out', 'pcs'),
         ];
+    }
+  }
+}
+
+// ── Saved production entries for current date + flow type ─────────────────
+
+class _SavedEntries extends StatelessWidget {
+  final ProductionController ctrl;
+  const _SavedEntries({required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      if (ctrl.isLoadingEntries.value) {
+        return const Padding(
+          padding: EdgeInsets.all(16), child: LoadingCenter());
+      }
+      final entries = ctrl.savedEntries;
+      if (entries.isEmpty) return const SizedBox.shrink();
+
+      return DCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: kNavy.withValues(alpha: 0.06),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.history, size: 16, color: kNavy),
+                const SizedBox(width: 8),
+                Text('${entries.length} saved entr${entries.length == 1 ? 'y' : 'ies'} today',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700, color: kNavy)),
+              ]),
+            ),
+            ...List.generate(entries.length, (i) {
+              final tx = entries[i];
+              return Container(
+                decoration: BoxDecoration(
+                  border: i < entries.length - 1
+                      ? Border(bottom: BorderSide(color: Colors.grey.shade200))
+                      : null,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(tx.summary,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 4),
+                    Text('${tx.userName}  •  ${_fmtTime(tx.createdAt)}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      );
+    });
+  }
+
+  String _fmtTime(String ts) {
+    try {
+      final dt = DateTime.parse(ts);
+      return DateFormat('h:mm a').format(dt);
+    } catch (_) {
+      return ts;
     }
   }
 }

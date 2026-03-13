@@ -42,7 +42,7 @@ class _FundsReportPageState extends State<FundsReportPage> {
           ),
         ],
       ),
-      body: Obx(() {
+      body: SelectionArea(child: Obx(() {
         if (c.isLoading.value) return const LoadingCenter();
         if (c.errorMessage.isNotEmpty) {
           return Center(
@@ -103,7 +103,7 @@ class _FundsReportPageState extends State<FundsReportPage> {
             ],
           ),
         );
-      }),
+      })),
     );
   }
 }

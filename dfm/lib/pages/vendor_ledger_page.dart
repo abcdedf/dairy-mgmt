@@ -48,7 +48,7 @@ class _VendorLedgerPageState extends State<VendorLedgerPage> {
           ),
         ],
       ),
-      body: Obx(() {
+      body: SelectionArea(child: Obx(() {
         if (ctrl.isLoading.value) return const LoadingCenter();
         if (ctrl.errorMessage.value.isNotEmpty) {
           return EmptyState(
@@ -115,7 +115,7 @@ class _VendorLedgerPageState extends State<VendorLedgerPage> {
             },
           ),
         );
-      }),
+      })),
     );
   }
 }
@@ -155,7 +155,7 @@ class _SummaryChip extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────
-// DETAIL PAGE
+// DETAIL PAGE — now with vendor dropdown + flat table
 // ────────────────────────────────────────────────────
 
 class _VendorDetailPage extends StatelessWidget {
@@ -174,6 +174,13 @@ class _VendorDetailPage extends StatelessWidget {
             ? ctrl.detailVendorName.value : 'Vendor Detail')),
         backgroundColor: _kTeal,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download_outlined),
+            onPressed: () => _exportDetailCsv(ctrl, inrFmt),
+            tooltip: 'Export CSV',
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showPaymentSheet(context, ctrl),
@@ -182,18 +189,42 @@ class _VendorDetailPage extends StatelessWidget {
         icon: const Icon(Icons.add),
         label: const Text('Record Payment'),
       ),
-      body: Obx(() {
+      body: SelectionArea(child: Obx(() {
         if (ctrl.isLoadingDetail.value) return const LoadingCenter();
         if (ctrl.errorMessage.value.isNotEmpty) {
           return EmptyState(
             icon: Icons.error_outline,
             message: ctrl.errorMessage.value,
             buttonLabel: 'Retry',
-            onButton: () => ctrl.fetchDetail(vendorId),
+            onButton: () => ctrl.fetchDetail(ctrl.selectedVendorId.value),
           );
         }
         return Column(children: [
-          // Summary header
+          // ── Vendor dropdown ──
+          if (ctrl.vendorList.isNotEmpty)
+            Container(
+              width: double.infinity,
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Obx(() => DropdownButtonFormField<int>(
+                initialValue: ctrl.selectedVendorId.value,
+                decoration: const InputDecoration(
+                  labelText: 'Vendor',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                items: [
+                  const DropdownMenuItem(value: 0, child: Text('All Vendors')),
+                  ...ctrl.vendorList.map((v) =>
+                      DropdownMenuItem(value: v.id, child: Text(v.name))),
+                ],
+                onChanged: (v) {
+                  if (v != null) ctrl.fetchDetail(v);
+                },
+              )),
+            ),
+          // ── Summary header ──
           Container(
             width: double.infinity,
             color: Colors.grey.shade50,
@@ -212,25 +243,10 @@ class _VendorDetailPage extends StatelessWidget {
                   ctrl.detailBalance.value > 0 ? kRed : kGreen),
             ]),
           ),
-          // Transaction list
-          Expanded(
-            child: ctrl.transactions.isEmpty
-                ? const EmptyState(
-                    icon: Icons.receipt_long_outlined,
-                    message: 'No transactions found.',
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: ctrl.transactions.length,
-                    itemBuilder: (context, i) {
-                      final tx = ctrl.transactions[i];
-                      if (tx.type == 'payment') return _PaymentTile(tx, inrFmt);
-                      return _PurchaseTile(tx, inrFmt);
-                    },
-                  ),
-          ),
+          // ── Flat transaction table ──
+          Expanded(child: _TransactionTable(ctrl: ctrl, inrFmt: inrFmt)),
         ]);
-      }),
+      })),
     );
   }
 
@@ -258,7 +274,6 @@ class _VendorDetailPage extends StatelessWidget {
             const Text('Record Payment',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 16),
-            // Amount
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -269,7 +284,6 @@ class _VendorDetailPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            // Date picker
             Obx(() => ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.calendar_today, size: 20),
@@ -284,7 +298,6 @@ class _VendorDetailPage extends StatelessWidget {
                 if (picked != null) date.value = picked;
               },
             )),
-            // Method dropdown
             Obx(() => DropdownButtonFormField<String>(
               initialValue: method.value,
               decoration: const InputDecoration(
@@ -296,7 +309,6 @@ class _VendorDetailPage extends StatelessWidget {
               onChanged: (v) { if (v != null) method.value = v; },
             )),
             const SizedBox(height: 12),
-            // Note
             TextField(
               controller: noteCtrl,
               decoration: const InputDecoration(
@@ -306,7 +318,6 @@ class _VendorDetailPage extends StatelessWidget {
               maxLength: 255,
             ),
             const SizedBox(height: 12),
-            // Save button
             SizedBox(
               width: double.infinity,
               child: Obx(() => ElevatedButton(
@@ -321,8 +332,14 @@ class _VendorDetailPage extends StatelessWidget {
                     ctrl.errorMessage.value = 'Enter a valid amount.';
                     return;
                   }
+                  // Use the currently selected vendor for payment
+                  final payVendorId = ctrl.selectedVendorId.value;
+                  if (payVendorId == 0) {
+                    ctrl.errorMessage.value = 'Select a specific vendor for payment.';
+                    return;
+                  }
                   final ok = await ctrl.savePayment(
-                    vendorId: vendorId,
+                    vendorId: payVendorId,
                     date: date.value,
                     amount: amount,
                     method: method.value,
@@ -336,7 +353,7 @@ class _VendorDetailPage extends StatelessWidget {
                         snackPosition: SnackPosition.BOTTOM,
                         duration: const Duration(seconds: 2),
                         margin: const EdgeInsets.all(12));
-                    ctrl.fetchDetail(vendorId);
+                    ctrl.fetchDetail(ctrl.selectedVendorId.value);
                     ctrl.fetchLedger();
                   }
                 },
@@ -353,71 +370,123 @@ class _VendorDetailPage extends StatelessWidget {
       ),
     );
   }
-}
 
-class _PurchaseTile extends StatelessWidget {
-  final LedgerTransaction tx;
-  final NumberFormat fmt;
-  const _PurchaseTile(this.tx, this.fmt);
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: ListTile(
-        leading: Container(
-          width: 36, height: 36,
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A73E8).withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.shopping_cart_outlined,
-              color: Color(0xFF1A73E8), size: 20),
-        ),
-        title: Text('${tx.product ?? ''} — ${tx.quantity?.toInt() ?? 0} KG @ ${fmt.format(tx.rate ?? 0)}',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-        subtitle: Text('${tx.date}  •  ${tx.locationName ?? ''}',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-        trailing: Text(fmt.format(tx.amount),
-            style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1A73E8), fontSize: 13)),
-      ),
-    );
+  void _exportDetailCsv(VendorLedgerController c, NumberFormat fmt) {
+    if (c.transactions.isEmpty) return;
+    final showVendor = c.selectedVendorId.value == 0;
+    final headers = [
+      'Date',
+      'Type',
+      if (showVendor) 'Vendor',
+      'Product',
+      'Qty',
+      'Rate',
+      'Amount',
+      'Method',
+      'Note',
+    ];
+    final csvRows = c.transactions.map((tx) => [
+      tx.date,
+      tx.type,
+      if (showVendor) tx.vendorName ?? '',
+      tx.product ?? '',
+      tx.quantity?.toStringAsFixed(2) ?? '',
+      tx.rate?.toStringAsFixed(2) ?? '',
+      tx.amount.toStringAsFixed(2),
+      tx.method ?? '',
+      tx.note ?? '',
+    ]).toList();
+    exportCsv(fileName: 'vendor_ledger_detail.csv', headers: headers, rows: csvRows);
   }
 }
 
-class _PaymentTile extends StatelessWidget {
-  final LedgerTransaction tx;
-  final NumberFormat fmt;
-  const _PaymentTile(this.tx, this.fmt);
+// ── Flat transaction table ──────────────────────────────────
+
+class _TransactionTable extends StatelessWidget {
+  final VendorLedgerController ctrl;
+  final NumberFormat inrFmt;
+  const _TransactionTable({required this.ctrl, required this.inrFmt});
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      color: const Color(0xFFF1F8E9),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: ListTile(
-        leading: Container(
-          width: 36, height: 36,
-          decoration: BoxDecoration(
-            color: kGreen.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
+    final txs = ctrl.transactions;
+    if (txs.isEmpty) {
+      return const EmptyState(
+        icon: Icons.receipt_long_outlined,
+        message: 'No transactions found.',
+      );
+    }
+    final showVendor = ctrl.selectedVendorId.value == 0;
+    final dateFmt = DateFormat('dd MMM');
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(8),
+      itemCount: txs.length,
+      itemBuilder: (_, i) {
+        final tx = txs[i];
+        final isPurchase = tx.type == 'purchase';
+        return Card(
+          margin: const EdgeInsets.only(bottom: 6),
+          color: isPurchase ? Colors.white : const Color(0xFFF1F8E9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(children: [
+              // Icon
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: isPurchase
+                      ? const Color(0xFF1A73E8).withValues(alpha: 0.12)
+                      : kGreen.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isPurchase ? Icons.shopping_cart_outlined : Icons.payments_outlined,
+                  color: isPurchase ? const Color(0xFF1A73E8) : kGreen,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Details
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isPurchase)
+                    Text(
+                      '${showVendor && tx.vendorName != null ? '${tx.vendorName} — ' : ''}'
+                      '${tx.product ?? ''} — ${tx.quantity?.toInt() ?? 0} KG @ ${inrFmt.format(tx.rate ?? 0)}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    )
+                  else
+                    Text(
+                      '${showVendor && tx.vendorName != null ? '${tx.vendorName} — ' : ''}'
+                      'Payment — ${tx.method ?? ''}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${dateFmt.format(DateTime.parse(tx.date))}'
+                    '${tx.locationName != null ? '  •  ${tx.locationName}' : ''}'
+                    '${tx.userName != null ? '  •  ${tx.userName}' : ''}'
+                    '${tx.note != null && tx.note!.isNotEmpty ? '  •  ${tx.note}' : ''}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                ],
+              )),
+              // Amount
+              Text(
+                '${isPurchase ? '' : '- '}${inrFmt.format(tx.amount)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: isPurchase ? const Color(0xFF1A73E8) : kGreen,
+                  fontSize: 13,
+                ),
+              ),
+            ]),
           ),
-          child: const Icon(Icons.payments_outlined, color: kGreen, size: 20),
-        ),
-        title: Text('Payment — ${tx.method ?? ''}',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-        subtitle: Text(
-            '${tx.date}  •  ${tx.userName ?? ''}'
-            '${tx.note != null && tx.note!.isNotEmpty ? '  •  ${tx.note}' : ''}',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-        trailing: Text('- ${fmt.format(tx.amount)}',
-            style: const TextStyle(
-                fontWeight: FontWeight.w700, color: kGreen, fontSize: 13)),
-      ),
+        );
+      },
     );
   }
 }

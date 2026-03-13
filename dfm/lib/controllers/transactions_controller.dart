@@ -110,6 +110,18 @@ class ProdTx {
                'Protein ${n('input_protein_kg').toInt()} KG  '
                'Skim ${n('input_skim_milk_kg').toInt()} KG  →  '
                '${n('output_container_count').toInt()} containers';
+      case 'Pouch Production':
+        return 'FF Milk ${n('total_ff_milk_kg').toInt()} KG  →  '
+               'Cream ${n('output_cream_kg').toInt()} KG (Fat ${n('output_cream_fat')})';
+      case 'Curd Production':
+        return 'FF Milk ${n('total_ff_milk_kg').toInt()} KG  →  '
+               'Cream ${n('output_cream_kg').toInt()} KG (Fat ${n('output_cream_fat')})  +  '
+               '${n('output_curd_matka').toInt()} Matka';
+      case 'Madhusudan Sale':
+        return '${n('total_ff_milk_kg').toInt()} KG  •  '
+               '₹${n('sale_rate').toStringAsFixed(2)}/KG';
+      case 'Ingredient Purchase':
+        return '${s('product_name')} ${n('quantity')} — ₹${n('rate').toStringAsFixed(2)}';
       default:
         return type;
     }

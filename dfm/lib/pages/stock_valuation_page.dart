@@ -47,7 +47,7 @@ class _StockValuationPageState extends State<StockValuationPage> {
           ),
         ],
       ),
-      body: Obx(() {
+      body: SelectionArea(child: Obx(() {
         if (ctrl.isLoading.value) return const LoadingCenter();
         if (ctrl.errorMessage.value.isNotEmpty) {
           return EmptyState(
@@ -106,7 +106,7 @@ class _StockValuationPageState extends State<StockValuationPage> {
                 : _ValuationGrid(ctrl: ctrl, inrFmt: inrFmt),
           ),
         ]);
-      }),
+      })),
     );
   }
 }

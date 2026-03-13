@@ -44,7 +44,7 @@ class _StockPageState extends State<StockPage> {
           ),
         ],
       ),
-      body: Obx(() {
+      body: SelectionArea(child: Obx(() {
         if (ctrl.isLoading.value) return const LoadingCenter();
         if (ctrl.errorMessage.value.isNotEmpty) {
           return EmptyState(
@@ -66,7 +66,7 @@ class _StockPageState extends State<StockPage> {
           _Legend(),
           Expanded(child: _StockGrid(ctrl: ctrl)),
         ]);
-      }),
+      })),
     );
   }
 }

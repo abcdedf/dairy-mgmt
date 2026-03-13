@@ -62,7 +62,7 @@ class _PouchPnlPageState extends State<PouchPnlPage> {
           ),
         ],
       ),
-      body: Column(children: [
+      body: SelectionArea(child: Column(children: [
         Expanded(child: Obx(() {
           if (ctrl.isLoading.value) return const LoadingCenter();
           if (ctrl.errorMessage.value.isNotEmpty) {
@@ -81,7 +81,7 @@ class _PouchPnlPageState extends State<PouchPnlPage> {
           }
           return _ReportBody(ctrl: ctrl);
         })),
-      ]),
+      ])),
     );
   }
 }
