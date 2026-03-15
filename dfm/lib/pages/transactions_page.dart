@@ -249,6 +249,7 @@ class _ProductionTransactionsPageState
               final parsed = DateTime.tryParse(tx.date);
               final dateStr = parsed != null ? dateFmt.format(parsed) : tx.date;
               final details = _prodDetailTags(tx);
+              debugPrint('[ProdTxRow] id=${tx.id} type=${tx.type} tags=${details.length} isWide=$isWide summary=${tx.summary}');
 
               if (isWide) {
                 return Container(
@@ -258,11 +259,14 @@ class _ProductionTransactionsPageState
                     SizedBox(width: 70, child: Text(dateStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
                     Expanded(flex: 2, child: Text(tx.locationName, style: const TextStyle(fontSize: 12))),
                     Expanded(flex: 2, child: _TypeBadge(tx.type)),
-                    Expanded(flex: 5, child: Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: details,
-                    )),
+                    Expanded(flex: 5, child: details.isNotEmpty
+                      ? Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: details,
+                        )
+                      : Text(tx.summary, style: const TextStyle(fontSize: 12)),
+                    ),
                     SizedBox(width: 60, child: Text(tx.userName, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: Colors.grey.shade500))),
                   ]),
                 );
@@ -279,7 +283,8 @@ class _ProductionTransactionsPageState
                     _Tag(dateStr, bold: true),
                     if (tx.locationName.isNotEmpty) _Tag(tx.locationName, dim: true),
                     _TypeBadge(tx.type),
-                    ...details,
+                    if (details.isNotEmpty) ...details
+                    else _Tag(tx.summary),
                     _Tag(tx.userName, dim: true),
                   ],
                 ),
@@ -304,6 +309,7 @@ class _ProductionTransactionsPageState
 // ── Production detail tags ────────────────────────────────────
 
 List<Widget> _prodDetailTags(ProdTx tx) {
+  debugPrint('[ProdDetailTags] type=${tx.type} id=${tx.id} rawKeys=${tx.raw.keys.toList()}');
   num n(String k) => num.tryParse(tx.raw[k]?.toString() ?? '') ?? 0;
   String s(String k) => tx.raw[k]?.toString() ?? '';
   final tags = <Widget>[];
@@ -356,6 +362,33 @@ List<Widget> _prodDetailTags(ProdTx tx) {
       final unit = tx.raw['product_id']?.toString() == '7' ? 'Bags' : 'KG';
       tags.add(_Tag('${s('product_name')} ${n('quantity')} $unit'));
       if (n('rate') > 0) tags.add(_Tag('₹${n('rate')}/$unit'));
+
+    case 'Pouch Production':
+      debugPrint('[ProdDetailTags] Pouch: notes type=${tx.raw['notes']?.runtimeType} lines type=${tx.raw['lines']?.runtimeType}');
+      debugPrint('[ProdDetailTags] Pouch: notes=${tx.raw['notes']}');
+      // V4: read cream from lines array
+      final pLines = tx.raw['lines'] as List?;
+      if (pLines != null) {
+        for (final l in pLines) {
+          final pid = int.tryParse(l['product_id']?.toString() ?? '') ?? 0;
+          final qty = double.tryParse(l['qty']?.toString() ?? '') ?? 0;
+          final fat = l['fat'] != null ? double.tryParse(l['fat'].toString()) : null;
+          if (pid == 3 && qty > 0) {
+            tags.add(_Tag('Cream ${qty % 1 == 0 ? qty.toInt() : qty} KG'));
+            if (fat != null) tags.add(_Tag('Fat $fat'));
+          }
+        }
+      }
+      // Pouch line details from notes
+      final pNotes = tx.raw['notes'];
+      if (pNotes is Map) {
+        final pouchLines = (pNotes['pouch_lines'] as List?) ?? [];
+        for (final pl in pouchLines) {
+          final name = pl['name']?.toString() ?? 'Pouch';
+          final crates = pl['crate_count'] ?? 0;
+          tags.add(_Tag('$name: $crates crates', bold: true));
+        }
+      }
 
     case 'Curd Production':
       tags.add(_Tag('Cream ${n('output_cream_kg').toInt()} KG'));
@@ -415,6 +448,7 @@ class _TypeBadge extends StatelessWidget {
     if (t.contains('FF Milk'))  return const Color(0xFF2E7D32);
     if (t.contains('Cream'))    return const Color(0xFF6A1B9A);
     if (t.contains('Butter'))   return const Color(0xFFE65100);
+    if (t.contains('Pouch'))      return const Color(0xFF5D4037);
     if (t.contains('Dahi'))       return const Color(0xFF00838F);
     if (t.contains('Curd'))       return const Color(0xFF00838F);
     if (t.contains('Madhusudan')) return const Color(0xFFD84315);

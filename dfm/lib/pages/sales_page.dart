@@ -188,7 +188,7 @@ class _SavedEntries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      final entries = ctrl.entries;
+      final entries = ctrl.filteredEntries;
       if (ctrl.isLoading.value) {
         return const Padding(
           padding: EdgeInsets.all(32), child: LoadingCenter());
@@ -198,38 +198,41 @@ class _SavedEntries extends StatelessWidget {
           padding: EdgeInsets.all(24),
           child: EmptyState(
             icon: Icons.receipt_long_outlined,
-            message: 'No sales yet for this date.',
+            message: 'No sales for the last 7 days.',
           ),
         );
       }
       final inrFmt = NumberFormat('#,##,##0.00', 'en_IN');
+      final dateFmt = DateFormat('dd MMM');
       return Column(children: [
         // Header
         Container(
           color: kNavy.withValues(alpha: 0.08),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: const Row(children: [
-            Expanded(flex: 3, child: Text('Product / Customer',
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(children: [
+            const Expanded(flex: 2, child: Text('Date',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: kNavy))),
-            Expanded(flex: 2, child: Text('Qty',
-                textAlign: TextAlign.center,
+            const Expanded(flex: 3, child: Text('Customer',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: kNavy))),
-            Expanded(flex: 2, child: Text('Rate',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: kNavy))),
-            Expanded(flex: 2, child: Text('Total',
+            Expanded(flex: 2, child: Text('Qty (${ctrl.selectedUnit})',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: kNavy))),
+            const Expanded(flex: 3, child: Text('Rate (₹)',
                 textAlign: TextAlign.right,
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: kNavy))),
-            SizedBox(width: 40),
+            const Expanded(flex: 4, child: Text('Total (₹)',
+                textAlign: TextAlign.right,
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: kNavy))),
+            const SizedBox(width: 36),
           ]),
         ),
         // Rows
         ...List.generate(entries.length, (i) {
           final entry = entries[i];
           final deletable = ctrl.canDelete(entry.id);
-          final unit = ctrl.products
-              .firstWhereOrNull((p) => p.id == entry.productId)
-              ?.unit ?? 'KG';
+          final dateStr = entry.date.isNotEmpty
+              ? dateFmt.format(DateTime.parse(entry.date))
+              : '';
           return Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -237,27 +240,23 @@ class _SavedEntries extends StatelessWidget {
                   ? Border(bottom: BorderSide(color: Colors.grey.shade200))
                   : null,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(children: [
-              Expanded(flex: 3, child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(entry.productName,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  Text(entry.customerName,
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                ],
-              )),
-              Expanded(flex: 2, child: Text('${entry.quantityKg} $unit',
-                  textAlign: TextAlign.center,
+              Expanded(flex: 2, child: Text(dateStr,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
+              Expanded(flex: 3, child: Text(entry.customerName,
+                  style: const TextStyle(fontSize: 13),
+                  overflow: TextOverflow.ellipsis)),
+              Expanded(flex: 2, child: Text('${entry.quantityKg}',
+                  textAlign: TextAlign.right,
                   style: const TextStyle(fontSize: 13))),
-              Expanded(flex: 2, child: Text('₹${entry.rate.toStringAsFixed(2)}',
-                  textAlign: TextAlign.center,
+              Expanded(flex: 3, child: Text(entry.rate.toStringAsFixed(2),
+                  textAlign: TextAlign.right,
                   style: const TextStyle(fontSize: 13))),
-              Expanded(flex: 2, child: Text('₹${inrFmt.format(entry.total)}',
+              Expanded(flex: 4, child: Text(inrFmt.format(entry.total),
                   textAlign: TextAlign.right,
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kGreen))),
-              SizedBox(width: 40, child: deletable
+              SizedBox(width: 36, child: deletable
                   ? IconButton(
                       icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
                       onPressed: () => ctrl.deleteEntry(entry.id),
@@ -283,9 +282,10 @@ class _DayTotalFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      if (ctrl.entries.isEmpty) return const SizedBox.shrink();
+      if (ctrl.filteredEntries.isEmpty) return const SizedBox.shrink();
+      final inrFmt = NumberFormat('#,##,##0.00', 'en_IN');
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border(top: BorderSide(color: Colors.grey.shade300, width: 1.5)),
@@ -295,16 +295,17 @@ class _DayTotalFooter extends StatelessWidget {
           )],
         ),
         child: Row(children: [
-          const Expanded(flex: 3, child: Text('Day Total',
+          const Expanded(flex: 2, child: SizedBox.shrink()),
+          const Expanded(flex: 3, child: Text('Total',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
           Expanded(flex: 2, child: Text('${ctrl.dayQty}',
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.right,
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.grey.shade700))),
-          const Expanded(flex: 2, child: SizedBox.shrink()),
-          Expanded(flex: 2, child: Text('₹${ctrl.dayTotal.toStringAsFixed(2)}',
+          const Expanded(flex: 3, child: SizedBox.shrink()),
+          Expanded(flex: 4, child: Text(inrFmt.format(ctrl.dayTotal),
               textAlign: TextAlign.right,
               style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kNavy))),
-          const SizedBox(width: 40),
+          const SizedBox(width: 36),
         ]),
       );
     });

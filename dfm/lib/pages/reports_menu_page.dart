@@ -10,6 +10,7 @@ import 'cashflow_report_page.dart';
 import 'profitability_report_page.dart';
 import 'transactions_page.dart';
 import 'stock_page.dart';
+import 'stock_flow_page.dart';
 import 'stock_valuation_page.dart';
 import 'pouch_stock_page.dart';
 import 'cash_stock_report_page.dart';
@@ -24,6 +25,7 @@ final Map<String, _ReportDef> _registry = {
   'production_transactions':_ReportDef(Icons.precision_manufacturing_outlined,const Color(0xFFE65100), () => const ProductionTransactionsPage()),
   'vendor_purchase_report': _ReportDef(Icons.local_shipping_outlined,        const Color(0xFF2E7D32), () => const VendorPurchaseReportPage()),
   'stock':                  _ReportDef(Icons.inventory_2_outlined,           const Color(0xFF455A64), () => const StockPage()),
+  'stock_flow':             _ReportDef(Icons.swap_vert_outlined,             const Color(0xFF37474F), () => const StockFlowPage()),
   'vendor_ledger':          _ReportDef(Icons.account_balance_wallet_outlined,const Color(0xFF00897B), () => const VendorLedgerPage()),
   'cashflow_report':        _ReportDef(Icons.account_balance_outlined,       const Color(0xFF0D47A1), () => const CashflowReportPage()),
   'profitability_report':   _ReportDef(Icons.trending_up_outlined,           const Color(0xFF1B5E20), () => const ProfitabilityReportPage()),

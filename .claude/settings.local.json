@@ -11,7 +11,8 @@
       "Bash(flutter run:*)",
       "Bash(pkill:*)",
       "Bash(dart analyze:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(grep:*)"
     ]
   }
 }

@@ -1,5 +1,6 @@
 // lib/controllers/production_controller.dart
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -73,13 +74,10 @@ class FlowDef {
   }
 }
 
-// TODO(refactor): Consider decomposing per-flow logic into separate strategy
-// objects or sub-controllers when the number of flows grows or unit testing
-// becomes necessary.
 class ProductionController extends GetxController {
   final isVendorLoading   = true.obs;
-  final vendors           = <Vendor>[].obs;
-  final selectedVendorId  = RxnInt();
+  final vendors           = <Party>[].obs;  // V4: unified parties
+  final selectedVendorId  = RxnInt();       // stores party_id
   final isLoading         = false.obs;
   final flowDefs          = <FlowDef>[].obs;
   final isFlowsLoading    = true.obs;
@@ -89,21 +87,22 @@ class ProductionController extends GetxController {
   final successMessage    = ''.obs;
 
   // ── Stock badges (read-only, shown in processing forms) ───────
-  final stockFfMilk  = RxnInt(); // ProductIds.ffMilk
-  final stockSkimMilk= RxnInt(); // ProductIds.skimMilk
-  final stockCream   = RxnInt(); // ProductIds.cream
-  final stockButter  = RxnInt(); // ProductIds.butter
-  final stockSmp     = RxnInt(); // ProductIds.smp
-  final stockProtein = RxnInt(); // ProductIds.protein
-  final stockCulture = RxnInt(); // ProductIds.culture
-  final stockCurd    = RxnInt(); // ProductIds.curd
-  final stockMatka   = RxnInt(); // ProductIds.matka (11)
+  final stockFfMilk  = RxnInt();
+  final stockSkimMilk= RxnInt();
+  final stockCream   = RxnInt();
+  final stockButter  = RxnInt();
+  final stockGhee    = RxnInt();
+  final stockSmp     = RxnInt();
+  final stockProtein = RxnInt();
+  final stockCulture = RxnInt();
+  final stockCurd    = RxnInt();
+  final stockMatka   = RxnInt();
 
-  // ── Saved entries for current date (shown below the form) ───
+  // ── Saved entries (shown below the form) ───
   final savedEntries       = <ProdTx>[].obs;
   final isLoadingEntries   = false.obs;
 
-  // Maps DataEntry → backend type string(s) from production-transactions
+  // Maps DataEntry → type label strings from V4 transactions
   static const _entryTypeMap = <DataEntry, List<String>>{
     DataEntry.ffMilkPurchase:   ['FF Milk Purchase'],
     DataEntry.ffMilkProcessing: ['FF Milk Processing'],
@@ -216,21 +215,6 @@ class ProductionController extends GetxController {
     DataEntry.madhusudanSale:   [madhusudanRateCtrl],
   };
 
-  // POST endpoint for writing new records.
-  // creamPurchase and butterPurchase differ from their read endpoints.
-  String _writeEndpointFor(DataEntry e) => switch (e) {
-    DataEntry.ffMilkPurchase   => '/milk-cream',
-    DataEntry.ffMilkProcessing => '/milk-cream',
-    DataEntry.creamPurchase    => '/cream-input',
-    DataEntry.creamProcessing  => '/cream-butter-ghee',
-    DataEntry.butterPurchase   => '/butter-input',
-    DataEntry.butterProcessing => '/butter-ghee',
-    DataEntry.smpPurchase      => '/smp-purchase',
-    DataEntry.pouchProduction  => '/pouch-production',
-    DataEntry.curdProduction   => '/curd-production',
-    DataEntry.madhusudanSale   => '/madhusudan-sale',
-  };
-
   @override
   void onInit() {
     super.onInit();
@@ -268,15 +252,19 @@ class ProductionController extends GetxController {
     super.onClose();
   }
 
+  // ── V4: Load vendors from unified parties table ────────────────
+
   Future<void> _loadVendors() async {
     isVendorLoading.value = true;
     try {
       final locId = LocationService.instance.locId;
-      final path = locId != null ? '/vendors?location_id=$locId' : '/vendors';
+      final path = locId != null
+          ? '/v4/parties?party_type=vendor&location_id=$locId'
+          : '/v4/parties?party_type=vendor';
       final res = await ApiClient.get(path);
       if (res.ok) {
         vendors.value = (res.data as List)
-            .map((e) => Vendor.fromJson(e as Map<String, dynamic>))
+            .map((e) => Party.fromJson(e as Map<String, dynamic>))
             .toList();
         if (vendors.isNotEmpty) selectedVendorId.value = vendors.first.id;
       }
@@ -295,7 +283,6 @@ class ProductionController extends GetxController {
           .map((e) => FlowDef.fromJson(e as Map<String, dynamic>))
           .where((f) => f.entry != null)
           .toList();
-      // If the currently selected entry is no longer in the list, reset to first
       if (flowDefs.isNotEmpty && !flowDefs.any((f) => f.entry == selectedEntry.value)) {
         selectedEntry.value = flowDefs.first.entry!;
       }
@@ -303,13 +290,13 @@ class ProductionController extends GetxController {
     isFlowsLoading.value = false;
   }
 
-  // ── Milk availability per vendor ──────────────────────────────
+  // ── V4: Milk availability per vendor ──────────────────────────
 
   Future<void> _fetchMilkAvailability() async {
     final locId = LocationService.instance.locId;
     if (locId == null) return;
     isLoadingAvail.value = true;
-    final res = await ApiClient.get('/milk-availability?location_id=$locId&as_of=$_date');
+    final res = await ApiClient.get('/v4/milk-availability?location_id=$locId&as_of=$_date');
     if (res.ok) {
       milkAvailability.value = (res.data as List)
           .map((e) => VendorMilkAvailability.fromJson(e as Map<String, dynamic>))
@@ -342,7 +329,7 @@ class ProductionController extends GetxController {
   // ── Pouch types ─────────────────────────────────────────────
 
   Future<void> _fetchPouchTypes() async {
-    final res = await ApiClient.get('/pouch-types');
+    final res = await ApiClient.get('/pouch-products');
     if (res.ok) {
       pouchTypes.value = (res.data as List)
           .map((e) => PouchType.fromJson(e as Map<String, dynamic>))
@@ -374,7 +361,7 @@ class ProductionController extends GetxController {
 
   Future<void> refreshPouchTypes() => _fetchPouchTypes();
 
-  // ── Fetch running stock balances for all badge products ───────
+  // ── V4: Fetch running stock balances ───────────────────────────
 
   Future<void> _fetchStock() async {
     final locId = LocationService.instance.locId;
@@ -383,7 +370,7 @@ class ProductionController extends GetxController {
     final from = DateFormat('yyyy-MM-dd')
         .format(DateTime.parse(date).subtract(const Duration(days: 29)));
     final res = await ApiClient.get(
-        '/stock?location_id=$locId&from=$from&to=$date');
+        '/v4/stock?location_id=$locId&from=$from&to=$date');
     if (!res.ok) return;
     final dates = res.data['dates'] as List?;
     if (dates == null || dates.isEmpty) {
@@ -391,6 +378,7 @@ class ProductionController extends GetxController {
       stockSkimMilk.value = null;
       stockCream.value    = null;
       stockButter.value   = null;
+      stockGhee.value     = null;
       stockSmp.value      = null;
       stockProtein.value  = null;
       stockCulture.value  = null;
@@ -408,6 +396,7 @@ class ProductionController extends GetxController {
     stockSkimMilk.value = val(ProductIds.skimMilk);
     stockCream.value    = val(ProductIds.cream);
     stockButter.value   = val(ProductIds.butter);
+    stockGhee.value     = val(ProductIds.ghee);
     stockSmp.value      = val(ProductIds.smp);
     stockProtein.value  = val(ProductIds.protein);
     stockCulture.value  = val(ProductIds.culture);
@@ -415,18 +404,17 @@ class ProductionController extends GetxController {
     stockMatka.value    = val(11);
   }
 
-  // ── Fetch saved entries for current date + flow type ──────────
+  // ── V4: Fetch saved entries for activity history ──────────────
 
   Future<void> _fetchSavedEntries() async {
     final locId = LocationService.instance.locId;
     if (locId == null) return;
     isLoadingEntries.value = true;
-    // Fetch 7 days ending on the selected date
     final to = _date;
     final from = DateFormat('yyyy-MM-dd')
         .format(entryDate.value.subtract(const Duration(days: 6)));
     final res = await ApiClient.get(
-        '/production-transactions?location_id=$locId&from=$from&to=$to');
+        '/v4/transactions?location_id=$locId&from=$from&to=$to');
     if (res.ok) {
       final allRows = (res.data['rows'] as List)
           .map((e) => ProdTx.fromJson(e as Map<String, dynamic>))
@@ -439,7 +427,23 @@ class ProductionController extends GetxController {
     isLoadingEntries.value = false;
   }
 
-  // ── Save ──────────────────────────────────────────────────────
+  // ── V4: Build milk_usage list from vendor picker rows ─────────
+
+  List<Map<String, dynamic>>? _buildMilkUsage() {
+    final muList = <Map<String, dynamic>>[];
+    for (final row in milkUsageRows) {
+      final vid = row['vendor_id'] as int?;
+      final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
+      if (vid != null && qty != 0) muList.add({'party_id': vid, 'qty': qty});
+    }
+    if (muList.isEmpty) {
+      errorMessage.value = 'Select at least one vendor with milk quantity.';
+      return null;
+    }
+    return muList;
+  }
+
+  // ── V4: Save ──────────────────────────────────────────────────
 
   Future<void> save() async {
     final locId = LocationService.instance.locId;
@@ -450,155 +454,179 @@ class ProductionController extends GetxController {
     errorMessage.value   = '';
     successMessage.value = '';
 
-    final endpoint = _writeEndpointFor(selectedEntry.value);
     late Map<String, dynamic> payload;
 
     switch (selectedEntry.value) {
 
       case DataEntry.ffMilkPurchase:
-        final p = MilkCreamInput(
-          locationId:   locId, entryDate: _date,
-          ffMilkKg:     int.parse(ffMilkCtrl.text),
-          snf:          double.parse(inSnfCtrl.text),
-          fat:          double.parse(inFatCtrl.text),
-          rate:         double.parse(rateCtrl.text),
-          ffMilkUsedKg: 0,
-          skimMilkKg:   0, skimSnf: 0, creamKg: 0, creamFat: 0,
-        ).toJson();
-        if (selectedVendorId.value != null) p['vendor_id'] = selectedVendorId.value;
-        payload = p;
+        payload = {
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'purchase',
+          'party_id': selectedVendorId.value,
+          'lines': [{
+            'product_id': ProductIds.ffMilk,
+            'qty': int.parse(ffMilkCtrl.text),
+            'rate': double.parse(rateCtrl.text),
+            'snf': double.parse(inSnfCtrl.text),
+            'fat': double.parse(inFatCtrl.text),
+          }],
+        };
 
       case DataEntry.ffMilkProcessing:
-        // Build milk_usage from vendor picker rows
-        final muList = <Map<String, dynamic>>[];
-        for (final row in milkUsageRows) {
-          final vid = row['vendor_id'] as int?;
-          final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
-          if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
-        }
-        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        final muList = _buildMilkUsage();
+        if (muList == null) { isLoading.value = false; return; }
         payload = {
-          'location_id': locId, 'entry_date': _date,
-          'input_ff_milk_kg': 0, 'input_snf': 0, 'input_fat': 0, 'input_rate': 0,
-          'output_skim_milk_kg': int.parse(skimMilkCtrl.text),
-          'output_skim_snf': double.parse(outSkimSnfCtrl.text),
-          'output_cream_kg': int.parse(creamOutCtrl.text),
-          'output_cream_fat': double.parse(creamFatCtrl.text),
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'processing',
+          'processing_type': 'ff_milk_processing',
           'milk_usage': muList,
+          'outputs': [
+            {'product_id': ProductIds.skimMilk, 'qty': int.parse(skimMilkCtrl.text), 'snf': double.parse(outSkimSnfCtrl.text)},
+            {'product_id': ProductIds.cream, 'qty': double.parse(creamOutCtrl.text), 'fat': double.parse(creamFatCtrl.text)},
+          ],
         };
 
       case DataEntry.creamPurchase:
-        final p = CreamInput(
-          locationId: locId, entryDate: _date,
-          creamKg:    int.parse(creamInCtrl.text),
-          fat:        double.tryParse(creamInFatCtrl.text) ?? 0,
-          rate:       double.tryParse(creamInRateCtrl.text) ?? 0,
-        ).toJson();
-        if (selectedVendorId.value != null) p['vendor_id'] = selectedVendorId.value;
-        payload = p;
+        payload = {
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'purchase',
+          'party_id': selectedVendorId.value,
+          'lines': [{
+            'product_id': ProductIds.cream,
+            'qty': int.parse(creamInCtrl.text),
+            'rate': double.tryParse(creamInRateCtrl.text) ?? 0,
+            'fat': double.tryParse(creamInFatCtrl.text) ?? 0,
+          }],
+        };
 
       case DataEntry.creamProcessing:
-        payload  = CreamButterGheeOutput(
-          locationId:  locId, entryDate: _date,
-          creamUsedKg: int.tryParse(creamUsedCtrl.text) ?? 0,
-          butterKg:    int.parse(butterOutCtrl.text),
-          butterFat:   double.parse(butterFatCtrl.text),
-          gheeKg:      int.parse(gheeOutCtrl.text),
-        ).toJson();
+        payload = {
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'processing',
+          'processing_type': 'cream_processing',
+          'inputs': [
+            {'product_id': ProductIds.cream, 'qty': int.tryParse(creamUsedCtrl.text) ?? 0},
+          ],
+          'outputs': [
+            {'product_id': ProductIds.butter, 'qty': int.parse(butterOutCtrl.text), 'fat': double.parse(butterFatCtrl.text)},
+            {'product_id': ProductIds.ghee, 'qty': int.parse(gheeOutCtrl.text)},
+          ],
+        };
 
       case DataEntry.butterPurchase:
-        final p = ButterInput(
-          locationId: locId, entryDate: _date,
-          butterKg:   int.parse(butterInCtrl.text),
-          fat:        double.tryParse(butterInFatCtrl.text) ?? 0,
-          rate:       double.tryParse(butterInRateCtrl.text) ?? 0,
-        ).toJson();
-        if (selectedVendorId.value != null) p['vendor_id'] = selectedVendorId.value;
-        payload = p;
+        payload = {
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'purchase',
+          'party_id': selectedVendorId.value,
+          'lines': [{
+            'product_id': ProductIds.butter,
+            'qty': int.parse(butterInCtrl.text),
+            'rate': double.tryParse(butterInRateCtrl.text) ?? 0,
+            'fat': double.tryParse(butterInFatCtrl.text) ?? 0,
+          }],
+        };
 
       case DataEntry.butterProcessing:
-        payload  = ButterGheeOutput(
-          locationId:   locId, entryDate: _date,
-          butterUsedKg: int.tryParse(butterUsedCtrl.text) ?? 0,
-          gheeKg:       int.parse(gheeOut3Ctrl.text),
-        ).toJson();
+        payload = {
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'processing',
+          'processing_type': 'butter_processing',
+          'inputs': [
+            {'product_id': ProductIds.butter, 'qty': int.tryParse(butterUsedCtrl.text) ?? 0},
+          ],
+          'outputs': [
+            {'product_id': ProductIds.ghee, 'qty': int.parse(gheeOut3Ctrl.text)},
+          ],
+        };
 
       case DataEntry.smpPurchase:
-        payload  = {
-          'location_id':  locId,
-          'entry_date':   _date,
-          'smp_bags':     double.tryParse(smpCtrl.text)     ?? 0,
-          'smp_rate':     double.tryParse(smpRateCtrl.text) ?? 0,
-          'protein_kg':   double.tryParse(proteinCtrl.text) ?? 0,
-          'protein_rate': double.tryParse(proteinRateCtrl.text) ?? 0,
-          'culture_kg':   double.tryParse(cultureCtrl.text) ?? 0,
-          'culture_rate': double.tryParse(cultureRateCtrl.text) ?? 0,
-          'matka_qty':    double.tryParse(matkaCtrl.text)    ?? 0,
-          'matka_rate':   double.tryParse(matkaRateCtrl.text) ?? 0,
+        final lines = <Map<String, dynamic>>[];
+        final smpQty = double.tryParse(smpCtrl.text) ?? 0;
+        if (smpQty != 0) lines.add({'product_id': ProductIds.smp, 'qty': smpQty, 'rate': double.tryParse(smpRateCtrl.text) ?? 0});
+        final protQty = double.tryParse(proteinCtrl.text) ?? 0;
+        if (protQty != 0) lines.add({'product_id': ProductIds.protein, 'qty': protQty, 'rate': double.tryParse(proteinRateCtrl.text) ?? 0});
+        final cultQty = double.tryParse(cultureCtrl.text) ?? 0;
+        if (cultQty != 0) lines.add({'product_id': ProductIds.culture, 'qty': cultQty, 'rate': double.tryParse(cultureRateCtrl.text) ?? 0});
+        final matkQty = double.tryParse(matkaCtrl.text) ?? 0;
+        if (matkQty != 0) lines.add({'product_id': 11, 'qty': matkQty, 'rate': double.tryParse(matkaRateCtrl.text) ?? 0});
+        if (lines.isEmpty) { errorMessage.value = 'Enter at least one item.'; isLoading.value = false; return; }
+        payload = {
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'purchase',
+          'party_id': selectedVendorId.value,
+          'lines': lines,
         };
 
       case DataEntry.pouchProduction:
-        // Build milk_usage from vendor picker rows
-        final muList = <Map<String, dynamic>>[];
-        for (final row in milkUsageRows) {
-          final vid = row['vendor_id'] as int?;
-          final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
-          if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
-        }
-        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
-        // Build pouch lines
+        final muList = _buildMilkUsage();
+        if (muList == null) { isLoading.value = false; return; }
         final plList = <Map<String, dynamic>>[];
         for (final row in pouchLineRows) {
           final ptId = row['pouch_type_id'] as int?;
           final qty  = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
-          if (ptId != null && qty > 0) plList.add({'pouch_type_id': ptId, 'crate_count': qty});
+          if (ptId != null && qty != 0) {
+            final ptName = pouchTypes.firstWhereOrNull((p) => p.id == ptId)?.name ?? '';
+            plList.add({'pouch_type_id': ptId, 'crate_count': qty, 'name': ptName});
+          }
         }
         if (plList.isEmpty) { errorMessage.value = 'Add at least one pouch type with crate count.'; isLoading.value = false; return; }
         payload = {
-          'location_id': locId, 'entry_date': _date,
-          'output_cream_kg': int.tryParse(pouchCreamOutCtrl.text) ?? 0,
-          'output_cream_fat': double.tryParse(pouchCreamFatCtrl.text) ?? 0,
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'processing',
+          'processing_type': 'pouch_production',
           'milk_usage': muList,
-          'pouch_lines': plList,
+          'outputs': [
+            {'product_id': ProductIds.cream, 'qty': double.tryParse(pouchCreamOutCtrl.text) ?? 0, 'fat': double.tryParse(pouchCreamFatCtrl.text) ?? 0},
+          ],
+          'notes': jsonEncode({'pouch_lines': plList}),
         };
 
       case DataEntry.curdProduction:
-        final muList = <Map<String, dynamic>>[];
-        for (final row in milkUsageRows) {
-            final vid = row['vendor_id'] as int?;
-            final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
-            if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
-        }
-        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        final muList = _buildMilkUsage();
+        if (muList == null) { isLoading.value = false; return; }
+        final curdQty = int.tryParse(curdOutCtrl.text) ?? 0;
         payload = {
-            'location_id': locId, 'entry_date': _date,
-            'output_cream_kg': int.tryParse(curdCreamOutCtrl.text) ?? 0,
-            'output_cream_fat': double.tryParse(curdCreamFatCtrl.text) ?? 0,
-            'output_curd_matka': int.tryParse(curdOutCtrl.text) ?? 0,
-            'input_smp_bags': int.tryParse(curdSmpCtrl.text) ?? 0,
-            'input_protein_kg': double.tryParse(curdProteinCtrl.text) ?? 0,
-            'input_culture_kg': double.tryParse(curdCultureCtrl.text) ?? 0,
-            'milk_usage': muList,
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'processing',
+          'processing_type': 'curd_production',
+          'milk_usage': muList,
+          'inputs': [
+            {'product_id': ProductIds.smp, 'qty': int.tryParse(curdSmpCtrl.text) ?? 0},
+            {'product_id': ProductIds.protein, 'qty': double.tryParse(curdProteinCtrl.text) ?? 0},
+            {'product_id': ProductIds.culture, 'qty': double.tryParse(curdCultureCtrl.text) ?? 0},
+            {'product_id': 11, 'qty': curdQty}, // Matka consumed
+          ],
+          'outputs': [
+            {'product_id': ProductIds.cream, 'qty': double.tryParse(curdCreamOutCtrl.text) ?? 0, 'fat': double.tryParse(curdCreamFatCtrl.text) ?? 0},
+            {'product_id': ProductIds.curd, 'qty': curdQty},
+          ],
         };
 
       case DataEntry.madhusudanSale:
-        final muList = <Map<String, dynamic>>[];
-        for (final row in milkUsageRows) {
-          final vid = row['vendor_id'] as int?;
-          final qty = int.tryParse((row['ctrl'] as TextEditingController).text) ?? 0;
-          if (vid != null && qty > 0) muList.add({'vendor_id': vid, 'ff_milk_kg': qty});
-        }
-        if (muList.isEmpty) { errorMessage.value = 'Select at least one vendor with milk quantity.'; isLoading.value = false; return; }
+        final muList = _buildMilkUsage();
+        if (muList == null) { isLoading.value = false; return; }
         final saleRate = double.tryParse(madhusudanRateCtrl.text) ?? 0;
         if (saleRate <= 0) { errorMessage.value = 'Madhusudan Rate must be greater than 0.'; isLoading.value = false; return; }
         payload = {
-          'location_id': locId, 'entry_date': _date,
-          'sale_rate': saleRate,
+          'location_id': locId,
+          'transaction_date': _date,
+          'transaction_type': 'processing',
+          'processing_type': 'madhusudan_sale',
           'milk_usage': muList,
+          'notes': jsonEncode({'sale_rate': saleRate}),
         };
     }
 
-    final res = await ApiClient.post(endpoint, payload);
+    final res = await ApiClient.post('/v4/transaction', payload);
     isLoading.value = false;
     if (res.ok) {
       for (final c in _entryFields[selectedEntry.value] ?? []) { c.clear(); }

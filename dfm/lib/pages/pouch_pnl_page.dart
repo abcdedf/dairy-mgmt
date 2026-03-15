@@ -48,8 +48,8 @@ class _PouchPnlPageState extends State<PouchPnlPage> {
       appBar: AppBar(
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
-        title: const Text('Pouch P&L',
-            style: TextStyle(fontWeight: FontWeight.w600)),
+        title: Text(titleWithLocation('Pouch P&L'),
+            style: const TextStyle(fontWeight: FontWeight.w600)),
         actions: [
           IconButton(
             icon: const Icon(Icons.download_outlined),

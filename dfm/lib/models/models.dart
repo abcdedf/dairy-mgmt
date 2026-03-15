@@ -10,21 +10,60 @@ class DairyLocation {
     id: int.parse(j['id'].toString()), name: j['name'], code: j['code']);
 }
 
+// ── Party Address ────────────────────────────────────────────
+class PartyAddress {
+  final int id;
+  final String addressType; // 'billing' or 'shipping'
+  final String label;
+  final String addressText;
+  final bool isDefault;
+
+  const PartyAddress({
+    this.id = 0,
+    required this.addressType,
+    this.label = '',
+    required this.addressText,
+    this.isDefault = false,
+  });
+
+  factory PartyAddress.fromJson(Map<String, dynamic> j) => PartyAddress(
+    id: int.tryParse(j['id']?.toString() ?? '') ?? 0,
+    addressType: j['address_type']?.toString() ?? 'shipping',
+    label: j['label']?.toString() ?? '',
+    addressText: j['address_text']?.toString() ?? '',
+    isDefault: j['is_default']?.toString() == '1',
+  );
+
+  Map<String, dynamic> toJson() => {
+    if (id > 0) 'id': id,
+    'address_type': addressType,
+    'label': label,
+    'address_text': addressText,
+    'is_default': isDefault ? 1 : 0,
+  };
+}
+
 // ── Customer ────────────────────────────────────────────────
 class Customer {
   final int    id;
   final String name;
   final bool   isActive;
   final List<int> productIds;
-  const Customer({required this.id, required this.name, this.isActive = true, this.productIds = const [], this.locationIds = const []});
   final List<int> locationIds;
+  final List<PartyAddress> addresses;
+  const Customer({required this.id, required this.name, this.isActive = true, this.productIds = const [], this.locationIds = const [], this.addresses = const []});
   factory Customer.fromJson(Map<String, dynamic> j) => Customer(
     id: int.parse(j['id'].toString()),
     name: j['name'].toString(),
     isActive: j['is_active']?.toString() != '0',
     productIds: (j['product_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
     locationIds: (j['location_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
+    addresses: (j['addresses'] as List?)?.map((e) => PartyAddress.fromJson(e as Map<String, dynamic>)).toList() ?? [],
   );
+
+  PartyAddress? get billingAddress => addresses.where((a) => a.addressType == 'billing').firstOrNull;
+  List<PartyAddress> get shippingAddresses => addresses.where((a) => a.addressType == 'shipping').toList();
+  PartyAddress? get defaultShippingAddress => shippingAddresses.where((a) => a.isDefault).firstOrNull ?? shippingAddresses.firstOrNull;
 }
 
 // ── Vendor ───────────────────────────────────────────────────
@@ -52,6 +91,23 @@ class DairyProduct {
   const DairyProduct({required this.id, required this.name, required this.unit});
   factory DairyProduct.fromJson(Map<String, dynamic> j) => DairyProduct(
     id: int.parse(j['id'].toString()), name: j['name'], unit: j['unit'] ?? 'KG');
+}
+
+// ── Party (V4 unified vendor/customer/internal) ─────────────
+class Party {
+  final int    id;
+  final String name;
+  final String partyType; // 'vendor', 'customer', 'internal'
+  final bool   isActive;
+  final List<int> productIds;
+  const Party({required this.id, required this.name, required this.partyType, this.isActive = true, this.productIds = const []});
+  factory Party.fromJson(Map<String, dynamic> j) => Party(
+    id: int.parse(j['id'].toString()),
+    name: j['name'].toString(),
+    partyType: j['party_type'].toString(),
+    isActive: j['is_active']?.toString() != '0',
+    productIds: (j['product_ids'] as List?)?.map((e) => int.parse(e.toString())).toList() ?? [],
+  );
 }
 
 // ── Product ID constants ─────────────────────────────────────
@@ -238,28 +294,33 @@ class VendorMilkAvailability {
   final int availableKg;
   const VendorMilkAvailability({required this.vendorId, required this.vendorName, required this.availableKg});
   factory VendorMilkAvailability.fromJson(Map<String, dynamic> j) => VendorMilkAvailability(
-    vendorId: int.parse(j['vendor_id'].toString()),
-    vendorName: j['vendor_name'].toString(),
+    vendorId: int.parse((j['party_id'] ?? j['vendor_id']).toString()),
+    vendorName: (j['party_name'] ?? j['vendor_name']).toString(),
     availableKg: int.parse(j['available_kg'].toString()),
   );
 }
 
-// ── Pouch Type ──────────────────────────────────────────────
-class PouchType {
+// ── Pouch Product ───────────────────────────────────────────
+class PouchProduct {
   final int id;
   final String name;
   final double milkPerPouch;
   final int pouchesPerCrate;
+  final double crateRate;
   final bool isActive;
-  const PouchType({required this.id, required this.name, required this.milkPerPouch, required this.pouchesPerCrate, required this.isActive});
-  factory PouchType.fromJson(Map<String, dynamic> j) => PouchType(
+  const PouchProduct({required this.id, required this.name, required this.milkPerPouch, required this.pouchesPerCrate, required this.crateRate, required this.isActive});
+  factory PouchProduct.fromJson(Map<String, dynamic> j) => PouchProduct(
     id: int.parse(j['id'].toString()),
     name: j['name'].toString(),
     milkPerPouch: double.parse((j['milk_per_pouch'] ?? j['litre'] ?? '0').toString()),
     pouchesPerCrate: int.tryParse((j['pouches_per_crate'] ?? '12').toString()) ?? 12,
+    crateRate: double.tryParse((j['crate_rate'] ?? '0').toString()) ?? 0,
     isActive: j['is_active'].toString() == '1',
   );
 }
+
+/// Backward-compatible alias
+typedef PouchType = PouchProduct;
 
 // ── Pouch Stock Row ─────────────────────────────────────────
 class PouchStockRow {

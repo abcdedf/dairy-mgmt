@@ -19,7 +19,7 @@ class PouchTypeController extends GetxController {
   Future<void> fetchPouchTypes() async {
     isLoading.value = true;
     errorMessage.value = '';
-    final res = await ApiClient.get('/pouch-types');
+    final res = await ApiClient.get('/pouch-products');
     if (res.ok) {
       pouchTypes.value = (res.data as List)
           .map((e) => PouchType.fromJson(e as Map<String, dynamic>))
@@ -30,13 +30,14 @@ class PouchTypeController extends GetxController {
     isLoading.value = false;
   }
 
-  Future<bool> savePouchType(String name, double milkPerPouch, int pouchesPerCrate) async {
+  Future<bool> savePouchType(String name, double milkPerPouch, int pouchesPerCrate, {double crateRate = 0}) async {
     errorMessage.value = '';
     successMessage.value = '';
-    final res = await ApiClient.post('/pouch-types', {
+    final res = await ApiClient.post('/pouch-products', {
       'name': name,
       'milk_per_pouch': milkPerPouch,
       'pouches_per_crate': pouchesPerCrate,
+      'crate_rate': crateRate,
     });
     if (res.ok) {
       successMessage.value = 'Pouch type added.';
@@ -47,15 +48,16 @@ class PouchTypeController extends GetxController {
     return false;
   }
 
-  Future<bool> updatePouchType(int id, {String? name, double? milkPerPouch, int? pouchesPerCrate, int? isActive}) async {
+  Future<bool> updatePouchType(int id, {String? name, double? milkPerPouch, int? pouchesPerCrate, double? crateRate, int? isActive}) async {
     errorMessage.value = '';
     successMessage.value = '';
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (milkPerPouch != null) body['milk_per_pouch'] = milkPerPouch;
     if (pouchesPerCrate != null) body['pouches_per_crate'] = pouchesPerCrate;
+    if (crateRate != null) body['crate_rate'] = crateRate;
     if (isActive != null) body['is_active'] = isActive;
-    final res = await ApiClient.post('/pouch-types/$id', body);
+    final res = await ApiClient.post('/pouch-products/$id', body);
     if (res.ok) {
       successMessage.value = 'Pouch type updated.';
       await fetchPouchTypes();

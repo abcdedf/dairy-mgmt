@@ -24,7 +24,7 @@ class StockController extends GetxController {
     if (locId == null) return;
     isLoading.value    = true;
     errorMessage.value = '';
-    final res = await ApiClient.get('/stock?location_id=$locId');
+    final res = await ApiClient.get('/v4/stock?location_id=$locId');
     isLoading.value = false;
     if (res.ok) {
       products.value  = (res.data['products'] as List)

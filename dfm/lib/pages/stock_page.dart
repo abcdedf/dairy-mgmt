@@ -33,7 +33,7 @@ class _StockPageState extends State<StockPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Stock'),
+        title: Text(titleWithLocation('Stock')),
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
         actions: [

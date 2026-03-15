@@ -31,7 +31,7 @@ class _PouchStockPageState extends State<PouchStockPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pouch Stock', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        title: Text(titleWithLocation('Pouch Stock'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
         actions: [

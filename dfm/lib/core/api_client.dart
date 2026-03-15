@@ -82,6 +82,29 @@ class ApiClient {
     }
   }
 
+  // ── PUT ──────────────────────────────────────────────
+
+  static Future<ApiResponse> put(String path, Map<String, dynamic> body) async {
+    if (testOverride != null) return testOverride!.instancePost(path, body);
+    final url = '${AppConfig.baseUrl}$path';
+    try {
+      final encodedBody = jsonEncode(body);
+      final res = await _withRefreshRetry(
+        'PUT', url,
+        (hdrs) => _client().put(Uri.parse(url), headers: hdrs, body: encodedBody)
+            .timeout(_timeout),
+        body: body,
+      );
+      return res;
+    } on SocketException {
+      return _networkError('PUT $url');
+    } on TimeoutException {
+      return _timeoutError('PUT $url');
+    } catch (e, st) {
+      return _unexpectedError('PUT $url', e, st);
+    }
+  }
+
   // ── DELETE ─────────────────────────────────────────────
 
   static Future<ApiResponse> delete(String path) async {

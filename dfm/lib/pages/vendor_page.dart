@@ -33,8 +33,8 @@ class _VendorPageState extends State<VendorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manage Vendors',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(titleWithLocation('Manage Vendors'),
+            style: const TextStyle(fontWeight: FontWeight.w700)),
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
       ),
@@ -154,7 +154,7 @@ class _VendorPageState extends State<VendorPage> {
                 child: Text(existing.isActive ? 'Deactivate' : 'Activate',
                     style: TextStyle(color: existing.isActive ? kRed : kGreen)),
               ),
-            const Spacer(),
+            const SizedBox(width: 8),
             TextButton(
               onPressed: () { ctrl.errorMessage.value = ''; Navigator.pop(ctx); },
               child: const Text('Cancel'),

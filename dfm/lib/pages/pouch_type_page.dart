@@ -32,7 +32,7 @@ class _PouchTypePageState extends State<PouchTypePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pouch Types', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        title: Text(titleWithLocation('Pouch Types'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
       ),
@@ -72,11 +72,12 @@ class _PouchTypePageState extends State<PouchTypePage> {
     final nameCtrl = TextEditingController();
     final milkCtrl = TextEditingController();
     final ppcCtrl  = TextEditingController();
+    final rateCtrl = TextEditingController();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Add Pouch Type', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        title: const Text('Add Pouch Product', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: nameCtrl, decoration: fieldDec('Name')),
           const SizedBox(height: 12),
@@ -85,6 +86,9 @@ class _PouchTypePageState extends State<PouchTypePage> {
           const SizedBox(height: 12),
           TextField(controller: ppcCtrl, decoration: fieldDec('Pouches per Crate'),
               keyboardType: TextInputType.number),
+          const SizedBox(height: 12),
+          TextField(controller: rateCtrl, decoration: fieldDec('Crate Rate', suffix: 'INR'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true)),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
@@ -94,8 +98,9 @@ class _PouchTypePageState extends State<PouchTypePage> {
               final name = nameCtrl.text.trim();
               final milk = double.tryParse(milkCtrl.text) ?? 0;
               final ppc  = int.tryParse(ppcCtrl.text) ?? 0;
+              final rate = double.tryParse(rateCtrl.text) ?? 0;
               if (name.isEmpty || milk <= 0 || ppc <= 0) return;
-              final ok = await ctrl.savePouchType(name, milk, ppc);
+              final ok = await ctrl.savePouchType(name, milk, ppc, crateRate: rate);
               if (ok && context.mounted) Navigator.pop(context);
             },
             child: const Text('Save'),
@@ -126,15 +131,18 @@ class _PouchTypeCard extends StatelessWidget {
           child: const Icon(Icons.local_drink_outlined, color: kNavy, size: 22),
         ),
         title: Text(pt.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        subtitle: Text('${pt.milkPerPouch} L/pouch  |  ${pt.pouchesPerCrate} per crate',
+        subtitle: Text('${pt.milkPerPouch} L/pouch  |  ${pt.pouchesPerCrate}/crate',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (!pt.isActive)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(color: kRed.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
               child: const Text('Inactive', style: TextStyle(fontSize: 10, color: kRed)),
             ),
+          Text('\u20B9${pt.crateRate.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: kNavy)),
           IconButton(
             icon: const Icon(Icons.edit_outlined, size: 18),
             onPressed: () => _showEditDialog(context),
@@ -148,13 +156,14 @@ class _PouchTypeCard extends StatelessWidget {
     final nameCtrl = TextEditingController(text: pt.name);
     final milkCtrl = TextEditingController(text: pt.milkPerPouch.toString());
     final ppcCtrl  = TextEditingController(text: pt.pouchesPerCrate.toString());
+    final rateCtrl = TextEditingController(text: pt.crateRate > 0 ? pt.crateRate.toStringAsFixed(2) : '');
     var active = pt.isActive;
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Edit Pouch Type', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          title: const Text('Edit Pouch Product', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(controller: nameCtrl, decoration: fieldDec('Name')),
             const SizedBox(height: 12),
@@ -163,6 +172,9 @@ class _PouchTypeCard extends StatelessWidget {
             const SizedBox(height: 12),
             TextField(controller: ppcCtrl, decoration: fieldDec('Pouches per Crate'),
                 keyboardType: TextInputType.number),
+            const SizedBox(height: 12),
+            TextField(controller: rateCtrl, decoration: fieldDec('Crate Rate', suffix: 'INR'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true)),
             const SizedBox(height: 12),
             SwitchListTile(
               title: const Text('Active', style: TextStyle(fontSize: 14)),
@@ -181,6 +193,7 @@ class _PouchTypeCard extends StatelessWidget {
                   name: nameCtrl.text.trim(),
                   milkPerPouch: double.tryParse(milkCtrl.text),
                   pouchesPerCrate: int.tryParse(ppcCtrl.text),
+                  crateRate: double.tryParse(rateCtrl.text),
                   isActive: active ? 1 : 0,
                 );
                 if (ok && context.mounted) Navigator.pop(context);

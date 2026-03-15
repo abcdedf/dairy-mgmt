@@ -145,7 +145,7 @@ class _VendorLedgerPageState extends State<VendorLedgerPage> {
                     return;
                   }
                   final ok = await ctrl.savePayment(
-                    vendorId: payVendorId.value,
+                    partyId: payVendorId.value,
                     date: date.value,
                     amount: amount,
                     method: method.value,

@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../controllers/customer_controller.dart';
-import '../models/models.dart';
 import 'shared_widgets.dart';
+import 'customer_edit_page.dart';
 
 class CustomerPage extends StatefulWidget {
   const CustomerPage({super.key});
@@ -29,17 +29,26 @@ class _CustomerPageState extends State<CustomerPage> {
     super.dispose();
   }
 
+  void _openEdit({int? index}) async {
+    final existing = index != null ? ctrl.customers[index] : null;
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => CustomerEditPage(ctrl: ctrl, existing: existing)),
+    );
+    if (result == true) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manage Customers',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(titleWithLocation('Manage Customers'),
+            style: const TextStyle(fontWeight: FontWeight.w700)),
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showDialog(context, null),
+        onPressed: () => _openEdit(),
         backgroundColor: kNavy,
         child: const Icon(Icons.add, color: Colors.white),
       ),
@@ -54,7 +63,7 @@ class _CustomerPageState extends State<CustomerPage> {
         return ListView.separated(
           padding: const EdgeInsets.all(12),
           itemCount: ctrl.customers.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
           itemBuilder: (_, i) => _EntityCard(
             name: ctrl.customers[i].name,
             isActive: ctrl.customers[i].isActive,
@@ -64,125 +73,15 @@ class _CustomerPageState extends State<CustomerPage> {
             locationTags: ctrl.customers[i].locationIds
                 .map((lid) => ctrl.locations.firstWhereOrNull((l) => l.id == lid)?.name ?? '?')
                 .toList(),
-            onEdit: () => _showDialog(context, ctrl.customers[i]),
+            onEdit: () => _openEdit(index: i),
           ),
-        );
-      }),
-    );
-  }
-
-  void _showDialog(BuildContext context, Customer? existing) {
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final selectedPids = <int>{...?existing?.productIds};
-    final selectedLids = <int>{...?existing?.locationIds};
-    final sellable = ctrl.sellableProducts;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: Text(existing == null ? 'Add Customer' : 'Edit Customer',
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: SizedBox(
-            width: 320,
-            child: SingleChildScrollView(child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: fieldDec('Customer Name'),
-                  textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 12),
-                const Text('Products', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                const SizedBox(height: 4),
-                Wrap(spacing: 6, runSpacing: 4, children: sellable.map((p) {
-                  final selected = selectedPids.contains(p.id);
-                  return FilterChip(
-                    label: Text(p.name, style: TextStyle(fontSize: 12, color: selected ? Colors.white : kNavy)),
-                    selected: selected,
-                    selectedColor: kNavy,
-                    checkmarkColor: Colors.white,
-                    backgroundColor: kNavy.withValues(alpha: 0.08),
-                    onSelected: (val) => setDialogState(() {
-                      if (val) { selectedPids.add(p.id); } else { selectedPids.remove(p.id); }
-                    }),
-                  );
-                }).toList()),
-                const SizedBox(height: 12),
-                const Text('Locations', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                const SizedBox(height: 4),
-                Wrap(spacing: 6, runSpacing: 4, children: ctrl.locations.map((l) {
-                  final selected = selectedLids.contains(l.id);
-                  return FilterChip(
-                    label: Text(l.name, style: TextStyle(fontSize: 12, color: selected ? Colors.white : kGreen)),
-                    selected: selected,
-                    selectedColor: kGreen,
-                    checkmarkColor: Colors.white,
-                    backgroundColor: kGreen.withValues(alpha: 0.08),
-                    onSelected: (val) => setDialogState(() {
-                      if (val) { selectedLids.add(l.id); } else { selectedLids.remove(l.id); }
-                    }),
-                  );
-                }).toList()),
-                Obx(() {
-                  if (ctrl.errorMessage.value.isEmpty) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(ctrl.errorMessage.value,
-                        style: const TextStyle(color: kRed, fontSize: 12)),
-                  );
-                }),
-              ],
-            )),
-          ),
-          actions: [
-            if (existing != null)
-              TextButton(
-                onPressed: () async {
-                  final ok = await ctrl.updateCustomer(
-                    existing.id, existing.name, existing.productIds.toList(), existing.locationIds.toList(),
-                    isActive: !existing.isActive,
-                  );
-                  if (ok && ctx.mounted) Navigator.pop(ctx);
-                },
-                child: Text(existing.isActive ? 'Deactivate' : 'Activate',
-                    style: TextStyle(color: existing.isActive ? kRed : kGreen)),
-              ),
-            const Spacer(),
-            TextButton(
-              onPressed: () { ctrl.errorMessage.value = ''; Navigator.pop(ctx); },
-              child: const Text('Cancel'),
-            ),
-            Obx(() => ElevatedButton(
-              onPressed: ctrl.isSaving.value ? null : () async {
-                final name = nameCtrl.text.trim();
-                if (name.isEmpty) { ctrl.errorMessage.value = 'Name is required.'; return; }
-                if (selectedPids.isEmpty) { ctrl.errorMessage.value = 'Select at least one product.'; return; }
-                bool ok;
-                if (existing == null) {
-                  ok = await ctrl.saveCustomer(name, selectedPids.toList(), selectedLids.toList());
-                } else {
-                  ok = await ctrl.updateCustomer(existing.id, name, selectedPids.toList(), selectedLids.toList());
-                }
-                if (ok && ctx.mounted) { ctrl.errorMessage.value = ''; Navigator.pop(ctx); }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kNavy, foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: Text(ctrl.isSaving.value ? 'Saving…' : 'Save'),
-            )),
-          ],
         );
       }),
     );
   }
 }
 
-// Shared card widget for customers and vendors
+// Compact single-row card for customers and vendors
 class _EntityCard extends StatelessWidget {
   final String name;
   final bool isActive;
@@ -193,49 +92,44 @@ class _EntityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: InkWell(
-        onTap: onEdit,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(children: [
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name, style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600,
-                  color: isActive ? Colors.black87 : Colors.grey,
-                )),
-                if (tags.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Wrap(spacing: 4, runSpacing: 2, children: tags.map((t) => _chip(t, kNavy)).toList()),
-                ],
-                if (locationTags.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Wrap(spacing: 4, runSpacing: 2, children: locationTags.map((t) => _chip(t, kGreen)).toList()),
-                ],
-              ],
-            )),
-            if (!isActive)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(4)),
-                child: const Text('Inactive', style: TextStyle(fontSize: 10, color: Colors.grey)),
-              ),
+    return InkWell(
+      onTap: onEdit,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(children: [
+          Expanded(child: Text(name,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 14, fontWeight: FontWeight.w600,
+              color: isActive ? Colors.black87 : Colors.grey,
+            ),
+          )),
+          const SizedBox(width: 8),
+          ...tags.map((t) => Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: _chip(t, kNavy),
+          )),
+          ...locationTags.map((t) => Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: _chip(t, kGreen),
+          )),
+          if (!isActive) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(4)),
+              child: const Text('Off', style: TextStyle(fontSize: 10, color: Colors.grey)),
+            ),
             const SizedBox(width: 4),
-            Icon(Icons.edit_outlined, size: 18, color: Colors.grey.shade400),
-          ]),
-        ),
+          ],
+          Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+        ]),
       ),
     );
   }
 
   Widget _chip(String text, Color color) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
     decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(4)),
-    child: Text(text, style: TextStyle(fontSize: 11, color: color)),
+    child: Text(text, style: TextStyle(fontSize: 10, color: color)),
   );
 }

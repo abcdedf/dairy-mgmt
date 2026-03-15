@@ -13,6 +13,13 @@ const kNavy  = Color(0xFF1B4F72);
 const kGreen = Color(0xFF1E8449);
 const kRed   = Color(0xFFE74C3C);
 
+/// Appends " (Location: XXX)" to a title based on the currently selected location.
+String titleWithLocation(String title) {
+  final loc = LocationService.instance.selected.value;
+  if (loc == null) return title;
+  return '$title (${loc.name})';
+}
+
 // ── Mobile form factor wrapper ────────────────────────────────
 // Wrap data-entry pages with this to cap width at 390px on wide screens.
 // Report pages should NOT use this — they get full browser width.
@@ -183,9 +190,9 @@ class IntField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextFormField(
     controller: controller,
-    keyboardType: TextInputType.number,
+    keyboardType: const TextInputType.numberWithOptions(signed: true),
     maxLength: maxDigits,
-    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^-?\d*'))],
     decoration: fieldDec(label, suffix: unit.isNotEmpty ? unit : null,
         hint: hint ?? (optional ? '0 (optional)' : null))
         .copyWith(counterText: ''),
@@ -208,7 +215,7 @@ class SnfFatField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextFormField(
     controller: controller,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
     inputFormatters: [
       FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,1}'))
     ],
@@ -236,9 +243,9 @@ class DecimalKgField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextFormField(
     controller: controller,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
     inputFormatters: [
-      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
+      FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d{0,2}'))
     ],
     decoration: fieldDec(label, suffix: unit,
         hint: optional ? '0.00 (optional)' : '0.00'),
@@ -264,9 +271,9 @@ class RateField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextFormField(
     controller: controller,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
     inputFormatters: [
-      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
+      FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d{0,2}'))
     ],
     decoration: fieldDec(label, suffix: suffix,
         hint: optional ? '0.00 (optional)' : null),
@@ -292,11 +299,11 @@ class CellField extends StatelessWidget {
   Widget build(BuildContext context) => TextFormField(
     controller: controller,
     keyboardType: isDecimal
-        ? const TextInputType.numberWithOptions(decimal: true)
-        : TextInputType.number,
+        ? const TextInputType.numberWithOptions(signed: true, decimal: true)
+        : const TextInputType.numberWithOptions(signed: true),
     inputFormatters: isDecimal
-        ? [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))]
-        : [FilteringTextInputFormatter.digitsOnly],
+        ? [FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d{0,2}'))]
+        : [FilteringTextInputFormatter.allow(RegExp(r'^-?\d*'))],
     textAlign: TextAlign.center,
     onChanged: (_) => onChanged?.call(),
     decoration: InputDecoration(

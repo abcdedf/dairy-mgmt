@@ -195,6 +195,10 @@ class _EntryForm extends StatelessWidget {
 
       case DataEntry.ffMilkPurchase:
         return [
+          _CompactStockLine(items: [
+            _StockItem('FF Milk', ctrl.stockFfMilk, 'KG'),
+          ]),
+          const SizedBox(height: 8),
           Obx(() => DropdownButtonFormField<int>(
             initialValue: ctrl.selectedVendorId.value,
             decoration: fieldDec('Vendor', prefixIcon: Icons.storefront_outlined),
@@ -205,14 +209,18 @@ class _EntryForm extends StatelessWidget {
           const SizedBox(height: 8),
           _Row4(
             IntField(ctrl.ffMilkCtrl, 'FF Milk', 'KG'),
-            RateField(ctrl.rateCtrl, 'Rate'),
-            SnfFatField(ctrl.inSnfCtrl, 'SNF'),
             SnfFatField(ctrl.inFatCtrl, 'Fat'),
+            SnfFatField(ctrl.inSnfCtrl, 'SNF'),
+            RateField(ctrl.rateCtrl, 'Rate'),
           ),
         ];
 
       case DataEntry.creamPurchase:
         return [
+          _CompactStockLine(items: [
+            _StockItem('Cream', ctrl.stockCream, 'KG'),
+          ]),
+          const SizedBox(height: 8),
           Obx(() => DropdownButtonFormField<int>(
             initialValue: ctrl.selectedVendorId.value,
             decoration: fieldDec('Vendor', prefixIcon: Icons.storefront_outlined),
@@ -256,6 +264,7 @@ class _EntryForm extends StatelessWidget {
           _CompactStockLine(label: 'Output Stock', items: [
             _StockItem('Skim Milk', ctrl.stockSkimMilk, 'KG'),
             _StockItem('Cream', ctrl.stockCream, 'KG'),
+            _StockItem('Ghee', ctrl.stockGhee, 'KG'),
           ]),
           const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
@@ -263,7 +272,7 @@ class _EntryForm extends StatelessWidget {
           _Row4(
             IntField(ctrl.skimMilkCtrl, 'Skim Milk', 'KG'),
             SnfFatField(ctrl.outSkimSnfCtrl, 'SNF'),
-            IntField(ctrl.creamOutCtrl, 'Cream', 'KG'),
+            DecimalKgField(ctrl.creamOutCtrl, 'Cream'),
             SnfFatField(ctrl.creamFatCtrl, 'Fat'),
           ),
         ];
@@ -276,6 +285,7 @@ class _EntryForm extends StatelessWidget {
           const SizedBox(height: 4),
           _CompactStockLine(label: 'Output Stock', items: [
             _StockItem('Butter', ctrl.stockButter, 'KG'),
+            _StockItem('Ghee', ctrl.stockGhee, 'KG'),
           ]),
           const SizedBox(height: 8),
           Row2(
@@ -321,7 +331,13 @@ class _EntryForm extends StatelessWidget {
 
       case DataEntry.butterProcessing:
         return [
-          _StockBadge(stock: ctrl.stockButter, label: 'Butter in stock'),
+          _CompactStockLine(items: [
+            _StockItem('Butter', ctrl.stockButter, 'KG'),
+          ]),
+          const SizedBox(height: 4),
+          _CompactStockLine(label: 'Output Stock', items: [
+            _StockItem('Ghee', ctrl.stockGhee, 'KG'),
+          ]),
           const SizedBox(height: 8),
           Row2(
             IntField(ctrl.butterUsedCtrl, 'Butter Used', 'KG'),
@@ -331,12 +347,18 @@ class _EntryForm extends StatelessWidget {
 
       case DataEntry.pouchProduction:
         return [
-          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
+          _CompactStockLine(items: [
+            _StockItem('FF Milk', ctrl.stockFfMilk, 'KG'),
+          ]),
+          const SizedBox(height: 4),
+          _CompactStockLine(label: 'Output Stock', items: [
+            _StockItem('Cream', ctrl.stockCream, 'KG'),
+          ]),
           const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
           const SizedBox(height: 8),
           Row2(
-            IntField(ctrl.pouchCreamOutCtrl, 'Cream Out', 'KG'),
+            DecimalKgField(ctrl.pouchCreamOutCtrl, 'Cream Out'),
             SnfFatField(ctrl.pouchCreamFatCtrl, 'Cream Fat'),
           ),
           const SizedBox(height: 8),
@@ -367,7 +389,7 @@ class _EntryForm extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _Row3(
-            IntField(ctrl.curdCreamOutCtrl, 'Cream Out', 'KG'),
+            DecimalKgField(ctrl.curdCreamOutCtrl, 'Cream Out'),
             SnfFatField(ctrl.curdCreamFatCtrl, 'Cream Fat'),
             IntField(ctrl.curdOutCtrl, 'Curd Out', 'Matka'),
           ),
@@ -375,7 +397,9 @@ class _EntryForm extends StatelessWidget {
 
       case DataEntry.madhusudanSale:
         return [
-          _StockBadge(stock: ctrl.stockFfMilk, label: 'FF Milk in stock'),
+          _CompactStockLine(items: [
+            _StockItem('FF Milk', ctrl.stockFfMilk, 'KG'),
+          ]),
           const SizedBox(height: 8),
           _VendorMilkPicker(ctrl: ctrl),
           const SizedBox(height: 8),
@@ -430,38 +454,35 @@ class _SavedEntries extends StatelessWidget {
             ),
             ...sortedDates.expand((date) {
               final dayEntries = byDate[date]!;
-              return [
-                // Date header
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  color: Colors.grey.shade100,
-                  child: Text(_fmtDate(date),
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                          color: Colors.grey.shade700)),
-                ),
-                ...List.generate(dayEntries.length, (i) {
-                  final tx = dayEntries[i];
-                  return Container(
-                    decoration: BoxDecoration(
-                      border: i < dayEntries.length - 1
-                          ? Border(bottom: BorderSide(color: Colors.grey.shade200))
-                          : null,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(tx.summary,
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 3),
-                        Text('${tx.userName}  •  ${_fmtTime(tx.createdAt)}',
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-                      ],
-                    ),
-                  );
-                }),
-              ];
+              return List.generate(dayEntries.length, (i) {
+                final tx = dayEntries[i];
+                final reversal = tx.isReversal;
+                return Container(
+                  decoration: BoxDecoration(
+                    color: reversal ? const Color(0xFFFDEDED) : null,
+                    border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  child: Row(children: [
+                    if (reversal) ...[
+                      const Icon(Icons.undo, size: 12, color: kRed),
+                      const SizedBox(width: 3),
+                    ],
+                    SizedBox(width: 50, child: Text(_fmtDate(date),
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade600))),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(
+                      reversal ? 'REV: ${tx.summary}' : tx.summary,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                          color: reversal ? kRed : null),
+                    )),
+                    const SizedBox(width: 6),
+                    Text('${tx.userName}  ${_fmtTime(tx.createdAt)}',
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                  ]),
+                );
+              });
             }),
           ],
         ),
@@ -472,7 +493,7 @@ class _SavedEntries extends StatelessWidget {
   String _fmtDate(String dateStr) {
     try {
       final dt = DateTime.parse(dateStr);
-      return DateFormat('dd MMM yyyy, EEEE').format(dt);
+      return DateFormat('dd MMM').format(dt);
     } catch (_) {
       return dateStr;
     }

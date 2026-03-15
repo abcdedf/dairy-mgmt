@@ -1,5 +1,6 @@
 // lib/controllers/customer_controller.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import '../core/api_client.dart';
 import '../models/models.dart';
@@ -30,6 +31,7 @@ class CustomerController extends GetxController {
       customers.value = (res.data as List)
           .map((e) => Customer.fromJson(e as Map<String, dynamic>))
           .toList();
+      debugPrint('[CustomerCtrl] loaded ${customers.length} customers');
     }
   }
 
@@ -39,6 +41,10 @@ class CustomerController extends GetxController {
       products.value = (res.data as List)
           .map((e) => DairyProduct.fromJson(e as Map<String, dynamic>))
           .toList();
+      debugPrint('[CustomerCtrl] loaded ${products.length} products: ${products.map((p) => '${p.id}:${p.name}').join(', ')}');
+      debugPrint('[CustomerCtrl] sellableProducts: ${sellableProducts.map((p) => '${p.id}:${p.name}').join(', ')}');
+    } else {
+      debugPrint('[CustomerCtrl] _loadProducts failed: ${res.message}');
     }
   }
 
@@ -54,13 +60,14 @@ class CustomerController extends GetxController {
   List<DairyProduct> get sellableProducts =>
       products.where((p) => ![6, 7, 8, 9].contains(p.id)).toList();
 
-  Future<bool> saveCustomer(String name, List<int> productIds, List<int> locationIds) async {
+  Future<bool> saveCustomer(String name, List<int> productIds, List<int> locationIds, {List<PartyAddress> addresses = const []}) async {
     isSaving.value     = true;
     errorMessage.value = '';
     final res = await ApiClient.post('/customers', {
       'name': name,
       'product_ids': productIds,
       'location_ids': locationIds,
+      'addresses': addresses.map((a) => a.toJson()).toList(),
     });
     isSaving.value = false;
     if (res.ok) {
@@ -71,7 +78,7 @@ class CustomerController extends GetxController {
     return false;
   }
 
-  Future<bool> updateCustomer(int id, String name, List<int> productIds, List<int> locationIds, {bool? isActive}) async {
+  Future<bool> updateCustomer(int id, String name, List<int> productIds, List<int> locationIds, {bool? isActive, List<PartyAddress>? addresses}) async {
     isSaving.value     = true;
     errorMessage.value = '';
     final body = <String, dynamic>{
@@ -80,6 +87,7 @@ class CustomerController extends GetxController {
       'location_ids': locationIds,
     };
     if (isActive != null) body['is_active'] = isActive ? 1 : 0;
+    if (addresses != null) body['addresses'] = addresses.map((a) => a.toJson()).toList();
     final res = await ApiClient.post('/customers/$id', body);
     isSaving.value = false;
     if (res.ok) {

@@ -96,7 +96,7 @@ class VendorLedgerController extends GetxController {
   }
 
   Future<bool> savePayment({
-    required int    vendorId,
+    required int    partyId,
     required DateTime date,
     required double amount,
     required String method,
@@ -105,7 +105,7 @@ class VendorLedgerController extends GetxController {
     isSaving.value     = true;
     errorMessage.value = '';
     final res = await ApiClient.post('/vendor-payment', {
-      'vendor_id':    vendorId,
+      'party_id':     partyId,
       'payment_date': _fmt.format(date),
       'amount':       amount,
       'method':       method,

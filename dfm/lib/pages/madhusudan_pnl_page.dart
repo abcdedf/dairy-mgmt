@@ -49,8 +49,8 @@ class _MadhusudanPnlPageState extends State<MadhusudanPnlPage> {
       appBar: AppBar(
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
-        title: const Text('Madhusudan P&L',
-            style: TextStyle(fontWeight: FontWeight.w600)),
+        title: Text(titleWithLocation('Madhusudan P&L'),
+            style: const TextStyle(fontWeight: FontWeight.w600)),
         actions: [
           IconButton(
             icon: const Icon(Icons.download_outlined),

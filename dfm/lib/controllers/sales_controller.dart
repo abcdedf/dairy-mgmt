@@ -9,6 +9,7 @@ import '../models/models.dart';
 
 class SaleEntry {
   final int    id;
+  final String date;
   final int    productId;
   final String productName;
   final int?   customerId;
@@ -19,6 +20,7 @@ class SaleEntry {
 
   const SaleEntry({
     required this.id,
+    required this.date,
     required this.productId,
     required this.productName,
     this.customerId,
@@ -28,25 +30,32 @@ class SaleEntry {
     required this.total,
   });
 
-  factory SaleEntry.fromJson(Map<String, dynamic> j) => SaleEntry(
-    id:           int.parse(j['id'].toString()),
-    productId:    int.parse(j['product_id'].toString()),
-    productName:  j['product_name']  ?? '',
-    customerId:   j['customer_id'] != null
-                    ? int.tryParse(j['customer_id'].toString()) : null,
-    customerName: j['customer_name'] ?? '',
-    quantityKg:   int.parse(j['quantity_kg'].toString()),
-    rate:         double.parse(j['rate'].toString()),
-    total:        double.parse(j['total'].toString()),
-  );
+  /// Parse from V4 transaction row (with lines array).
+  factory SaleEntry.fromV4(Map<String, dynamic> j) {
+    final lines = j['lines'] as List? ?? [];
+    final line = lines.isNotEmpty ? lines[0] as Map<String, dynamic> : <String, dynamic>{};
+    final qty = (double.tryParse(line['qty']?.toString() ?? '0') ?? 0).abs();
+    final rate = double.tryParse(line['rate']?.toString() ?? '0') ?? 0;
+    return SaleEntry(
+      id:           int.parse(j['id'].toString()),
+      date:         j['transaction_date']?.toString() ?? j['entry_date']?.toString() ?? '',
+      productId:    int.tryParse(line['product_id']?.toString() ?? '0') ?? 0,
+      productName:  line['product_name']?.toString() ?? '',
+      customerId:   j['party_id'] != null ? int.tryParse(j['party_id'].toString()) : null,
+      customerName: j['party_name']?.toString() ?? '',
+      quantityKg:   qty.toInt(),
+      rate:         rate,
+      total:        qty * rate,
+    );
+  }
 }
 
 class SalesController extends GetxController {
   final isLoading           = false.obs;
   final isSaving            = false.obs;
   final products            = <DairyProduct>[].obs;
-  final allCustomers        = <Customer>[].obs;
-  final filteredCustomers   = <Customer>[].obs;
+  final allCustomers        = <Party>[].obs;  // V4: unified parties
+  final filteredCustomers   = <Party>[].obs;
   final entries             = <SaleEntry>[].obs;
   final entryDate           = DateTime.now().obs;
   final errorMessage        = ''.obs;
@@ -67,9 +76,17 @@ class SalesController extends GetxController {
   final stockGhee     = RxnInt();
 
   String get _date => DateFormat('yyyy-MM-dd').format(entryDate.value);
-  int    get dayQty   => entries.fold(0, (s, e) => s + e.quantityKg);
-  double get dayTotal => entries.fold(0.0, (s, e) => s + e.total);
   bool canDelete(int id) => _deletableIds.contains(id);
+
+  /// Entries filtered by selected product — last 7 days.
+  List<SaleEntry> get filteredEntries {
+    final pid = productId.value;
+    if (pid == null) return entries;
+    return entries.where((e) => e.productId == pid).toList();
+  }
+
+  int    get dayQty   => filteredEntries.fold(0, (s, e) => s + e.quantityKg);
+  double get dayTotal => filteredEntries.fold(0.0, (s, e) => s + e.total);
 
   /// Unit label for the currently selected product.
   String get selectedUnit =>
@@ -90,37 +107,56 @@ class SalesController extends GetxController {
   }
 
   Future<void> _loadInit() async {
+    await _loadProducts();
     await _loadCustomers();
     await fetchSales();
     _fetchStock();
   }
 
-  Future<void> _loadCustomers() async {
-    final res = await ApiClient.get('/customers');
+  Future<void> _loadProducts() async {
+    final res = await ApiClient.get('/products');
     if (res.ok) {
-      allCustomers.value = (res.data as List)
-          .map((e) => Customer.fromJson(e as Map<String, dynamic>))
-          .toList();
+      const salesOrder = <int, int>{1: 0, 2: 1, 5: 2, 10: 3, 4: 4, 3: 5};
+      final fallback = salesOrder.length;
+      products.value = (res.data as List)
+          .map((e) => DairyProduct.fromJson(e as Map<String, dynamic>))
+          .where((p) => p.id != 12) // Pouch Milk sold via challans, not sales
+          .toList()
+        ..sort((a, b) =>
+            (salesOrder[a.id] ?? fallback).compareTo(salesOrder[b.id] ?? fallback));
+      if (productId.value == null && products.isNotEmpty) {
+        productId.value = products.first.id;
+      }
     }
   }
 
-  /// Filter customers by the currently selected product.
+  // V4: Load customers from unified parties table
+  Future<void> _loadCustomers() async {
+    final res = await ApiClient.get('/v4/parties?party_type=customer');
+    if (res.ok) {
+      allCustomers.value = (res.data as List)
+          .map((e) => Party.fromJson(e as Map<String, dynamic>))
+          .toList();
+      _filterCustomers();
+    }
+  }
+
+  /// Filter customers by selected product — only show customers assigned to this product.
   void _filterCustomers() {
     final pid = productId.value;
-    if (pid == null) {
-      filteredCustomers.value = allCustomers;
-    } else {
+    if (pid != null) {
       filteredCustomers.value = allCustomers
-          .where((c) => c.productIds.contains(pid))
+          .where((c) => c.productIds.isEmpty || c.productIds.contains(pid))
           .toList();
+    } else {
+      filteredCustomers.value = allCustomers.toList();
     }
-    // Reset customer selection if current customer is not in filtered list
+    debugPrint('[Sales] filterCustomers: product=$pid → ${filteredCustomers.length} customers');
     if (customerId.value != null &&
         !filteredCustomers.any((c) => c.id == customerId.value)) {
       customerId.value = filteredCustomers.isNotEmpty
           ? filteredCustomers.first.id : null;
     }
-    // Auto-select first customer if none selected
     if (customerId.value == null && filteredCustomers.isNotEmpty) {
       customerId.value = filteredCustomers.first.id;
     }
@@ -128,42 +164,35 @@ class SalesController extends GetxController {
 
   void onProductChanged(int? id) {
     productId.value = id;
-    _filterCustomers();
+    _loadCustomers(); // Reload from server to pick up newly added customers
   }
 
+  /// Refresh customers from server — call when page regains focus.
+  Future<void> refreshCustomers() async {
+    await _loadCustomers();
+  }
+
+  // V4: Fetch sales from V4 transactions — last 7 days up to selected date
   Future<void> fetchSales({bool keepDeletable = false}) async {
     final locId = LocationService.instance.locId;
     if (locId == null) return;
     if (!keepDeletable) _deletableIds.clear();
     isLoading.value    = true;
     errorMessage.value = '';
+    final from = DateFormat('yyyy-MM-dd')
+        .format(entryDate.value.subtract(const Duration(days: 6)));
     final res = await ApiClient.get(
-        '/sales?location_id=$locId&entry_date=$_date');
+        '/v4/transactions?location_id=$locId&from=$from&to=$_date&transaction_type=sale');
     isLoading.value = false;
     if (!res.ok) {
       errorMessage.value = res.message ?? 'Error fetching sales.';
       return;
     }
-    const salesOrder = <int, int>{1: 0, 2: 1, 5: 2, 10: 3, 4: 4, 3: 5};
-    final fallback = salesOrder.length;
-    products.value = (res.data['products'] as List)
-        .map((e) => DairyProduct.fromJson(e as Map<String, dynamic>))
-        .toList()
-      ..sort((a, b) =>
-          (salesOrder[a.id] ?? fallback).compareTo(
-              salesOrder[b.id] ?? fallback));
-    entries.value = (res.data['entries'] as List)
-        .map((e) => SaleEntry.fromJson(e as Map<String, dynamic>))
-        .toList();
-
-    // Set default product if not already chosen
-    if (productId.value == null && products.isNotEmpty) {
-      productId.value = products.first.id;
-    }
-    _filterCustomers();
+    final rows = res.data['rows'] as List? ?? [];
+    entries.value = rows.map((e) => SaleEntry.fromV4(e as Map<String, dynamic>)).toList();
   }
 
-  /// Save a single sale entry.
+  /// V4: Save a single sale entry.
   Future<void> save() async {
     final qty  = int.tryParse(qtyCtrl.text) ?? 0;
     final rate = double.tryParse(rateCtrl.text) ?? 0.0;
@@ -176,8 +205,8 @@ class SalesController extends GetxController {
       errorMessage.value = 'Select a customer.';
       return;
     }
-    if (qty <= 0) {
-      errorMessage.value = 'Qty must be > 0.';
+    if (qty == 0) {
+      errorMessage.value = 'Qty must not be 0.';
       return;
     }
     if (rate < 0) {
@@ -192,13 +221,16 @@ class SalesController extends GetxController {
     errorMessage.value   = '';
     successMessage.value = '';
 
-    final res = await ApiClient.post('/sales', {
-      'location_id': locId,
-      'entry_date':  _date,
-      'product_id':  productId.value,
-      'customer_id': customerId.value,
-      'quantity_kg': qty,
-      'rate':        rate,
+    final res = await ApiClient.post('/v4/transaction', {
+      'location_id':      locId,
+      'transaction_date': _date,
+      'transaction_type': 'sale',
+      'party_id':         customerId.value,
+      'lines': [{
+        'product_id': productId.value,
+        'qty':        qty,
+        'rate':       rate,
+      }],
     });
 
     isSaving.value = false;
@@ -223,10 +255,11 @@ class SalesController extends GetxController {
     }
   }
 
+  // V4: Delete a transaction
   Future<void> deleteEntry(int id) async {
     errorMessage.value   = '';
     successMessage.value = '';
-    final res = await ApiClient.delete('/sales/$id');
+    final res = await ApiClient.delete('/v4/transaction/$id');
     if (res.ok) {
       _deletableIds.remove(id);
       entries.removeWhere((e) => e.id == id);
@@ -257,6 +290,7 @@ class SalesController extends GetxController {
     }
   }
 
+  // V4: Fetch stock
   Future<void> _fetchStock() async {
     final locId = LocationService.instance.locId;
     if (locId == null) return;
@@ -264,7 +298,7 @@ class SalesController extends GetxController {
     final from = DateFormat('yyyy-MM-dd')
         .format(DateTime.parse(date).subtract(const Duration(days: 29)));
     final res = await ApiClient.get(
-        '/stock?location_id=$locId&from=$from&to=$date');
+        '/v4/stock?location_id=$locId&from=$from&to=$date');
     if (!res.ok) return;
     final dates = res.data['dates'] as List?;
     if (dates == null || dates.isEmpty) {

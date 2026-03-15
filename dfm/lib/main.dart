@@ -15,6 +15,7 @@ import 'pages/production_page.dart';
 import 'pages/sales_page.dart';
 import 'pages/reports_menu_page.dart';
 import 'controllers/production_controller.dart';
+import 'controllers/sales_controller.dart';
 import 'pages/shared_widgets.dart';
 import 'pages/help_page.dart';
 import 'pages/anomaly_page.dart';
@@ -129,7 +130,7 @@ const List<_PageDef> _allPages = [
   ),
   _PageDef(
     key:        'admin',
-    page:       MobileFormFactor(child: AdminMenuPage()),
+    page:       AdminMenuPage(),
     label:      'Admin',
     icon:       Icons.settings_outlined,
     activeIcon: Icons.settings,
@@ -381,6 +382,10 @@ class _AppShellState extends State<AppShell> {
         selectedIndex: safeIdx,
         onDestinationSelected: (i) {
           setState(() => _idx = i);
+          // Refresh sales customers when switching to the Sales tab
+          if (pages[i].key == 'sales' && Get.isRegistered<SalesController>()) {
+            Get.find<SalesController>().refreshCustomers();
+          }
         },
         indicatorColor: kNavy.withValues(alpha: 0.12),
         destinations: pages.map((p) => NavigationDestination(

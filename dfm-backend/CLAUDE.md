@@ -187,8 +187,20 @@ $this->ok($data, $status = 200)          // Success response
 $this->err($msg, $status = 400)          // Error response
 $this->audit($table, $id, $action, $old, $new)  // Write audit log entry
 $this->check_db($ctx)                    // Log wpdb error if any after a query
+$this->safe_insert($table, $data, $ctx)  // Insert with return-value check + error log + success log
 $this->log($message)                     // Write to PHP error log
 ```
+
+### DB Operation Error Handling — MANDATORY
+**Every DB write must be verified. Silent failures have caused production bugs.**
+
+1. **For `$db->insert()`**: Use `$this->safe_insert()` which checks return value, logs success/failure, and calls `check_db()`. For critical inserts (migrations, seed data), add a follow-up `SELECT` to verify.
+2. **For `$db->update()` / `$db->delete()` / `$db->query()`**: Always check the return value (`=== false` for failure) AND call `$this->check_db()` after.
+3. **`check_db()` alone is NOT sufficient** — `$wpdb->last_error` can be empty even when an operation fails.
+4. **After deploying PHP changes**: Claude must verify the operation worked by checking the DB or API response — never assume silent success.
+
+### Flutter Debug Logging — MANDATORY
+**Add `debugPrint()` statements for all new functionality.** Performance cost is negligible; debugging cost without them is high. Every controller method that loads data, saves data, or makes API calls should log what it received/sent.
 
 ### Standard endpoint handler pattern
 ```php
@@ -217,7 +229,7 @@ public function save_something(WP_REST_Request $r): WP_REST_Response {
 ```
 
 ### DB migrations
-Self-healing migrations run in `ensure_dahi_product()` on WordPress `init`. Always check before altering:
+Migrations are version-guarded via `run_migrations()` using `dairy_migration_version` WP option. They only run once per version bump. To add new migrations: bump `MIGRATION_VERSION` constant in the PHP plugin, add migration code to `ensure_dahi_product()` or `ensure_v4_schema()`. Always check before altering:
 ```php
 $exists = $this->db()->get_var("SELECT COUNT(*) FROM information_schema.X WHERE ...");
 if (!$exists) { $this->db()->query("ALTER TABLE ... ADD ..."); }
@@ -381,6 +393,34 @@ flutter build web --base-href /dairyapp/
 - Stock query window must be 30 days to get correct cumulative balance
 - `dairy_transaction_days` WP option controls transaction history (default 7, max 90)
 
+
+## Production Database Safety Rules
+
+**CRITICAL: The server database is a PRODUCTION database.**
+- **NEVER** run INSERT, UPDATE, or DELETE on data rows without explicit user permission for each operation.
+- **NEVER** run TRUNCATE or DROP TABLE without explicit user permission.
+- **Allowed without permission:** SELECT queries (read-only) and schema changes (CREATE TABLE, ALTER TABLE, CREATE INDEX).
+- After any approved DB modification, always run a follow-up SELECT to verify the change took effect. Never trust silent success — SSH/mysql commands can silently fail due to quoting issues.
+
+---
+
+## Behavioural Rules
+
+- **Never kill browsers** — Do not `pkill` Chrome or any browser process when restarting Flutter. Only kill `flutter run` processes. The user has personal browser sessions open that must not be disrupted.
+
+---
+
+## Tech Debt
+
+- **V3 milk_cream_production denormalization** — `wp_mf_3_dp_milk_cream_production` has `input_ff_milk_kg` and `vendor_id` on processing records that duplicate `wp_mf_3_dp_milk_usage` rows (added later for multi-vendor support). Plan: create new normalized tables, copy data, drop old columns. Take DB backup first. Not a priority — functionality works.
+
+---
+
+## Backlog
+
+- **Flutter UI for vendor-location assignment** — Currently only manageable via WP admin page. Need a Flutter admin page to assign which vendors appear at which locations. Backend handler exists (`handle_save_vendor_locations`).
+
+---
 
 ## Publishing the app  on the web server:
 **CRITICAL: NEVER deploy to the server (Flutter web build, PHP plugin, or any file) unless the user explicitly says "deploy" or "publish". The server is a PRODUCTION host. All testing must be done locally using `flutter run -d chrome`. This applies to both Flutter and PHP files — do not scp anything to the server without explicit ask.**

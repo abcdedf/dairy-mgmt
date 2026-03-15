@@ -32,8 +32,8 @@ class _ProductAdminPageState extends State<ProductAdminPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manage Products',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(titleWithLocation('Manage Products'),
+            style: const TextStyle(fontWeight: FontWeight.w700)),
         backgroundColor: kNavy,
         foregroundColor: Colors.white,
       ),
@@ -114,7 +114,7 @@ class _ProductAdminPageState extends State<ProductAdminPage> {
             child: Text(product.isActive ? 'Deactivate' : 'Activate',
                 style: TextStyle(color: product.isActive ? kRed : kGreen)),
           ),
-          const Spacer(),
+          const SizedBox(width: 8),
           TextButton(
             onPressed: () { ctrl.errorMessage.value = ''; Navigator.pop(ctx); },
             child: const Text('Cancel'),
