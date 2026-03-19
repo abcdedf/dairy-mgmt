@@ -230,4 +230,4 @@ scp -i /path/to/key.pem dfm-backend/dairy-production-api/dairy-production-api.ph
 
 ## License
 
-Copyright 2026 Abhaya Pattanaik. All rights reserved.
+MIT License. See [LICENSE](LICENSE) for details.
