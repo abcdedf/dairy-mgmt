@@ -28,7 +28,6 @@ class Dairy_Production_API {
     const TABLE_LABELS = [
         'wp_mf_3_dp_estimated_rates'       => 'Estimated Rates',
         'wp_mf_3_dp_pouch_products'        => 'Pouch Products',
-        'wp_mf_3_dp_pouch_rates'           => 'Pouch Rates',
         'wp_mf_3_dp_production_flows'      => 'Production Flows',
         'wp_mf_4_transactions'             => 'Transactions',
         'wp_mf_4_transaction_lines'        => 'Transaction Lines',
@@ -239,7 +238,7 @@ class Dairy_Production_API {
     // MIGRATION RUNNER — version-guarded, runs once per version bump
     // ════════════════════════════════════════════════════
 
-    private const MIGRATION_VERSION = 10;
+    private const MIGRATION_VERSION = 12;
 
     public function run_migrations(): void {
         $current = (int) get_option('dairy_migration_version', 0);
@@ -292,6 +291,38 @@ class Dairy_Production_API {
         // V10: Address snapshots on challans/invoices + company settings defaults
         if ($current < 10) {
             $this->ensure_document_addresses_v10();
+        }
+
+        // V11: Drop redundant pouch_rates table — rates consolidated into pouch_products.crate_rate
+        if ($current < 11) {
+            $exists = (int) $this->db()->get_var(
+                "SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wp_mf_3_dp_pouch_rates'");
+            if ($exists) {
+                $this->db()->query("DROP TABLE wp_mf_3_dp_pouch_rates");
+                $this->check_db('v11.drop_pouch_rates');
+                $this->log('V11: Dropped wp_mf_3_dp_pouch_rates (rates in pouch_products.crate_rate)');
+            }
+        }
+
+        // V12: Per-customer pouch rates table
+        if ($current < 12) {
+            $exists = (int) $this->db()->get_var(
+                "SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wp_mf_3_dp_customer_pouch_rates'");
+            if (!$exists) {
+                $this->db()->query("
+                    CREATE TABLE wp_mf_3_dp_customer_pouch_rates (
+                        id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        party_id        INT UNSIGNED NOT NULL,
+                        pouch_product_id INT UNSIGNED NOT NULL,
+                        crate_rate      DECIMAL(10,2) NOT NULL,
+                        UNIQUE KEY uq_party_pouch (party_id, pouch_product_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
+                $this->check_db('v12.create_customer_pouch_rates');
+                $this->log('V12: Created wp_mf_3_dp_customer_pouch_rates table');
+            }
         }
 
         update_option('dairy_migration_version', self::MIGRATION_VERSION);
@@ -447,14 +478,7 @@ class Dairy_Production_API {
             $this->check_db('ensure_dahi_product.pouch_types_drop_price');
         }
 
-        // ── Pouch Rates table ──
-        $db->query("
-            CREATE TABLE IF NOT EXISTS wp_mf_3_dp_pouch_rates (
-                pouch_type_id  INT UNSIGNED NOT NULL PRIMARY KEY,
-                rate_per_crate DECIMAL(10,2) NOT NULL DEFAULT 0
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-        ");
-        $this->check_db('ensure_dahi_product.pouch_rates_table');
+        // pouch_rates table removed — rates consolidated into pouch_products.crate_rate
 
         // ── Curd product ──
         $exists = $db->get_var("SELECT COUNT(*) FROM wp_mf_3_dp_products WHERE id=10");
@@ -1245,7 +1269,7 @@ class Dairy_Production_API {
      * V7 Migration: Drop unused V3 data tables that were re-created empty by ensure_dahi_product()
      * after V2 had renamed them to wp_mf_xx3_dp_*. The _xx3_ copies hold archived data.
      * Also renames pouch_types (leftover from V5 rename to pouch_products).
-     * pouch_rates is NOT touched — still actively used.
+     * pouch_rates was removed — rates consolidated into pouch_products.crate_rate.
      */
     private function cleanup_unused_v3_tables_v7(): void {
         $db = $this->db();
@@ -1507,9 +1531,12 @@ class Dairy_Production_API {
         $this->r('/pouch-products',            'GET',  'get_pouch_products',          $auth);
         $this->r('/pouch-products',            'POST', 'save_pouch_product',          $auth);
         $this->r('/pouch-products/(?P<id>\\d+)','POST','update_pouch_product',       $auth);
+        // Per-customer pouch rates
+        $this->r('/customer-pouch-rates',              'GET',  'get_customer_pouch_rates',    $auth);
+        $this->r('/customer-pouch-rates',              'POST', 'save_customer_pouch_rate',    $auth);
+        $this->r('/customer-pouch-rates/(?P<id>\\d+)', 'DELETE','delete_customer_pouch_rate', $auth);
         // V3 pouch-production/stock routes removed — Flutter uses /v4/transaction
-        $this->r('/pouch-rates',            'GET',  'get_pouch_rates',             $auth);
-        $this->r('/pouch-rates',            'POST', 'save_pouch_rates',            $auth);
+        // pouch-rates routes removed — rates live in pouch_products.crate_rate
         $this->r('/pouch-pnl',              'GET',  'get_pouch_pnl',              $auth);
         // V3 madhusudan-sale routes removed — Flutter uses /v4/transaction
         $this->r('/madhusudan-pnl',       'GET',  'get_madhusudan_pnl',      $auth);
@@ -3863,6 +3890,91 @@ class Dairy_Production_API {
     }
 
     // ════════════════════════════════════════════════════
+    // CUSTOMER POUCH RATES
+    // ════════════════════════════════════════════════════
+
+    public function get_customer_pouch_rates(WP_REST_Request $r): WP_REST_Response {
+        try {
+            $pp_id = (int) $r->get_param('pouch_product_id');
+            $db = $this->db();
+            if ($pp_id > 0) {
+                $rows = $db->get_results($db->prepare("
+                    SELECT cpr.id, cpr.party_id, p.name AS party_name,
+                           cpr.pouch_product_id, cpr.crate_rate
+                      FROM wp_mf_3_dp_customer_pouch_rates cpr
+                      JOIN wp_mf_4_parties p ON p.id = cpr.party_id
+                     WHERE cpr.pouch_product_id = %d
+                     ORDER BY p.name
+                ", $pp_id), ARRAY_A);
+            } else {
+                $rows = $db->get_results("
+                    SELECT cpr.id, cpr.party_id, p.name AS party_name,
+                           cpr.pouch_product_id, cpr.crate_rate
+                      FROM wp_mf_3_dp_customer_pouch_rates cpr
+                      JOIN wp_mf_4_parties p ON p.id = cpr.party_id
+                     ORDER BY p.name
+                ", ARRAY_A);
+            }
+            $this->check_db('get_customer_pouch_rates');
+            return $this->ok($rows ?? []);
+        } catch (\Exception $e) { return $this->exc('get_customer_pouch_rates', $e); }
+    }
+
+    public function save_customer_pouch_rate(WP_REST_Request $r): WP_REST_Response {
+        try {
+            $party_id   = (int) $r->get_param('party_id');
+            $pp_id      = (int) $r->get_param('pouch_product_id');
+            $crate_rate = $this->d2($r->get_param('crate_rate'));
+
+            if ($party_id <= 0 || $pp_id <= 0) return $this->err('party_id and pouch_product_id required.');
+            if ((float) $crate_rate <= 0) return $this->err('crate_rate must be positive.');
+
+            $db = $this->db();
+            // Upsert: INSERT ON DUPLICATE KEY UPDATE
+            $sql = $db->prepare("
+                INSERT INTO wp_mf_3_dp_customer_pouch_rates (party_id, pouch_product_id, crate_rate)
+                VALUES (%d, %d, %s)
+                ON DUPLICATE KEY UPDATE crate_rate = VALUES(crate_rate)
+            ", $party_id, $pp_id, $crate_rate);
+            $result = $db->query($sql);
+            $this->check_db('save_customer_pouch_rate');
+            if ($result === false) {
+                return $this->err('Database error saving customer pouch rate.', 500);
+            }
+            // Get the id (insert_id if new, or look up if updated)
+            $id = $db->insert_id;
+            if (!$id) {
+                $id = (int) $db->get_var($db->prepare("
+                    SELECT id FROM wp_mf_3_dp_customer_pouch_rates
+                     WHERE party_id = %d AND pouch_product_id = %d
+                ", $party_id, $pp_id));
+            }
+            $this->audit('wp_mf_3_dp_customer_pouch_rates', $id, 'UPSERT', null,
+                ['party_id' => $party_id, 'pouch_product_id' => $pp_id, 'crate_rate' => $crate_rate]);
+            $this->log("Customer pouch rate saved: party=$party_id pouch=$pp_id rate=$crate_rate");
+            return $this->ok(['id' => $id], 201);
+        } catch (\Exception $e) { return $this->exc('save_customer_pouch_rate', $e); }
+    }
+
+    public function delete_customer_pouch_rate(WP_REST_Request $r): WP_REST_Response {
+        try {
+            $id = (int) $r['id'];
+            $db = $this->db();
+            $old = $db->get_row($db->prepare(
+                "SELECT * FROM wp_mf_3_dp_customer_pouch_rates WHERE id = %d", $id), ARRAY_A);
+            if (!$old) return $this->err('Rate not found.', 404);
+            $result = $db->delete('wp_mf_3_dp_customer_pouch_rates', ['id' => $id]);
+            $this->check_db('delete_customer_pouch_rate');
+            if ($result === false) {
+                return $this->err('Database error deleting customer pouch rate.', 500);
+            }
+            $this->audit('wp_mf_3_dp_customer_pouch_rates', $id, 'DELETE', $old, null);
+            $this->log("Customer pouch rate deleted: id=$id");
+            return $this->ok(['deleted' => true]);
+        } catch (\Exception $e) { return $this->exc('delete_customer_pouch_rate', $e); }
+    }
+
+    // ════════════════════════════════════════════════════
     // SHARED STOCK MOVEMENTS SQL
     // ════════════════════════════════════════════════════
 
@@ -3961,43 +4073,7 @@ class Dairy_Production_API {
 
     // V3 Pouch Stock removed — Flutter uses /v4/transaction
 
-    public function get_pouch_rates(): WP_REST_Response {
-        try {
-            $rows = $this->db()->get_results(
-                "SELECT pr.pouch_type_id, pt.name, pr.rate_per_crate
-                   FROM wp_mf_3_dp_pouch_rates pr
-                   JOIN wp_mf_3_dp_pouch_products pt ON pt.id = pr.pouch_type_id
-                  WHERE pt.is_active = 1
-                  ORDER BY pt.name", ARRAY_A);
-            $this->check_db('get_pouch_rates');
-            return $this->ok($rows ?? []);
-        } catch (\Exception $e) { return $this->exc('get_pouch_rates', $e); }
-    }
-
-    public function save_pouch_rates( WP_REST_Request $r ): WP_REST_Response {
-        try {
-            $rates = $r->get_param('rates');
-            if (!is_array($rates) || empty($rates)) return $this->err('rates array is required.');
-            $db = $this->db();
-            foreach ($rates as $rate) {
-                $ptid = (int) ($rate['pouch_type_id'] ?? 0);
-                $rpc  = $this->d2($rate['rate_per_crate'] ?? 0);
-                if ($ptid <= 0) continue;
-                $old = $db->get_row($db->prepare(
-                    "SELECT * FROM wp_mf_3_dp_pouch_rates WHERE pouch_type_id=%d", $ptid), ARRAY_A);
-                $db->query($db->prepare(
-                    "INSERT INTO wp_mf_3_dp_pouch_rates (pouch_type_id, rate_per_crate)
-                     VALUES (%d, %s) ON DUPLICATE KEY UPDATE rate_per_crate = VALUES(rate_per_crate)",
-                    $ptid, $rpc));
-                $this->check_db('save_pouch_rates');
-                $new = $db->get_row($db->prepare(
-                    "SELECT * FROM wp_mf_3_dp_pouch_rates WHERE pouch_type_id=%d", $ptid), ARRAY_A);
-                $action = $old ? 'UPDATE' : 'INSERT';
-                $this->audit('wp_mf_3_dp_pouch_rates', $ptid, $action, $old, $new);
-            }
-            return $this->ok(['saved' => count($rates)]);
-        } catch (\Exception $e) { return $this->exc('save_pouch_rates', $e); }
-    }
+    // get_pouch_rates / save_pouch_rates removed — rates live in pouch_products.crate_rate
 
     public function get_pouch_pnl( WP_REST_Request $r ): WP_REST_Response {
         if ($e = $this->validate_loc($r)) return $e;
@@ -4016,18 +4092,15 @@ class Dairy_Production_API {
                   ORDER BY transaction_date DESC, id DESC", $loc), ARRAY_A);
             $this->check_db('pouch_pnl.txns');
 
-            // Get pouch rates (still V3 config table)
-            $rate_rows = $db->get_results(
-                "SELECT pouch_type_id, rate_per_crate FROM wp_mf_3_dp_pouch_rates", ARRAY_A);
-            $this->check_db('pouch_pnl.rates');
-            $rates = [];
-            foreach ($rate_rows as $rr) $rates[(int)$rr['pouch_type_id']] = (float)$rr['rate_per_crate'];
-
-            // Get pouch type info (still V3 config table)
+            // Get pouch type info + rates from pouch_products
             $pt_rows = $db->get_results(
-                "SELECT id, name, milk_per_pouch, pouches_per_crate FROM wp_mf_3_dp_pouch_products", ARRAY_A);
+                "SELECT id, name, milk_per_pouch, pouches_per_crate, crate_rate FROM wp_mf_3_dp_pouch_products", ARRAY_A);
             $pts = [];
-            foreach ($pt_rows as $p) $pts[(int)$p['id']] = $p;
+            $rates = [];
+            foreach ($pt_rows as $p) {
+                $pts[(int)$p['id']] = $p;
+                $rates[(int)$p['id']] = (float)$p['crate_rate'];
+            }
 
             // Batch-fetch all transaction lines
             $all_lines = [];
@@ -5480,11 +5553,18 @@ class Dairy_Production_API {
                  ORDER BY name
             ", ARRAY_A) ?? [];
 
+            // Per-customer pouch rate overrides (small table, return all)
+            $customer_pouch_rates = $db->get_results("
+                SELECT party_id, pouch_product_id, crate_rate
+                  FROM wp_mf_3_dp_customer_pouch_rates
+            ", ARRAY_A) ?? [];
+
             return $this->ok([
-                'challans'       => $challans,
-                'customers'      => $customers,
-                'products'       => $products,
-                'pouch_products' => $pouch_products,
+                'challans'              => $challans,
+                'customers'             => $customers,
+                'products'              => $products,
+                'pouch_products'        => $pouch_products,
+                'customer_pouch_rates'  => $customer_pouch_rates,
             ]);
         } catch (\Exception $e) { return $this->exc('get_v4_challans', $e); }
     }

@@ -176,8 +176,14 @@ class ProdTx {
       }
       return '${totalIn.toInt()} KG$rateStr';
     }
-    // Pouch production: append pouch line details from notes
+    // Pouch production: append pouch milk total + pouch line details from notes
+    debugPrint('[v4Summary] procType=$procType totalIn=$totalIn outStr=$outStr pos=${pos.length} neg=${neg.length}');
     if (procType == 'pouch_production') {
+      // Get pouch milk total (product 12)
+      final pouchMilkLine = pos.where((l) => (int.tryParse(l['product_id']?.toString() ?? '0') ?? 0) == 12).toList();
+      final pouchMilkKg = pouchMilkLine.isNotEmpty
+          ? (double.tryParse(pouchMilkLine.first['qty']?.toString() ?? '0') ?? 0).toInt()
+          : 0;
       String pouchStr = '';
       final notes = raw['notes'];
       if (notes != null) {
@@ -190,10 +196,12 @@ class ProdTx {
             final crates = pl['crate_count'] ?? 0;
             parts.add('$name: $crates crates');
           }
-          if (parts.isNotEmpty) pouchStr = '  +  ${parts.join(', ')}';
+          if (parts.isNotEmpty) pouchStr = '  |  ${parts.join(', ')}';
         } catch (_) {}
       }
-      return '${totalIn.toInt()} KG  →  $outStr$pouchStr';
+      final pouchTotal = pouchMilkKg > 0 ? '  +  Pouch Milk $pouchMilkKg KG' : '';
+      debugPrint('[v4Summary] pouch result: ${totalIn.toInt()} KG → $outStr$pouchTotal$pouchStr');
+      return '${totalIn.toInt()} KG  →  $outStr$pouchTotal$pouchStr';
     }
     return '${totalIn.toInt()} KG  →  $outStr';
   }

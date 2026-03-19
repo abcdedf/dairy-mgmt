@@ -1,5 +1,6 @@
 // lib/core/document_pdf.dart
 
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -8,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../controllers/challan_controller.dart';
 import '../controllers/invoice_controller.dart';
 import 'api_client.dart';
+import 'pdf_images.dart';
 
 /// Company info loaded from backend.
 class CompanyInfo {
@@ -65,23 +67,26 @@ class DocumentPdf {
 
   static Future<void> showChallanPdf(Challan challan) async {
     final company = await CompanyInfo.fetch();
+    final headerImg = pw.MemoryImage(challanHeaderBytes);
+    final footerImg = pw.MemoryImage(challanFooterBytes);
     debugPrint('[DocumentPdf] Generating challan PDF: DC-${challan.challanNumber}');
     await Printing.layoutPdf(
-      onLayout: (_) => _buildChallanPdf(challan, company),
+      onLayout: (_) => _buildChallanPdf(challan, company, headerImg, footerImg),
       name: 'DC-${challan.challanNumber}',
     );
   }
 
-  static Future<Uint8List> _buildChallanPdf(Challan ch, CompanyInfo co) async {
+  static Future<Uint8List> _buildChallanPdf(Challan ch, CompanyInfo co,
+      pw.MemoryImage headerImg, pw.MemoryImage footerImg) async {
     final pdf = pw.Document();
 
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(32),
+      margin: const pw.EdgeInsets.only(left: 32, top: 32, right: 32, bottom: 80),
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          _companyHeader(co),
+          pw.Image(headerImg, width: ctx.page.pageFormat.availableWidth),
           pw.SizedBox(height: 8),
           pw.Divider(thickness: 1),
           pw.SizedBox(height: 12),
@@ -159,7 +164,7 @@ class DocumentPdf {
 
           // Footer
           pw.Divider(thickness: 0.5),
-          _companyFooter(co),
+          pw.Image(footerImg, width: ctx.page.pageFormat.availableWidth),
         ],
       ),
     ));
@@ -171,23 +176,26 @@ class DocumentPdf {
 
   static Future<void> showInvoicePdf(Invoice invoice) async {
     final company = await CompanyInfo.fetch();
+    final headerImg = pw.MemoryImage(invoiceHeaderBytes);
+    final footerImg = pw.MemoryImage(invoiceFooterBytes);
     debugPrint('[DocumentPdf] Generating invoice PDF: INV-${invoice.invoiceNumber}');
     await Printing.layoutPdf(
-      onLayout: (_) => _buildInvoicePdf(invoice, company),
+      onLayout: (_) => _buildInvoicePdf(invoice, company, headerImg, footerImg),
       name: 'INV-${invoice.invoiceNumber}',
     );
   }
 
-  static Future<Uint8List> _buildInvoicePdf(Invoice inv, CompanyInfo co) async {
+  static Future<Uint8List> _buildInvoicePdf(Invoice inv, CompanyInfo co,
+      pw.MemoryImage headerImg, pw.MemoryImage footerImg) async {
     final pdf = pw.Document();
 
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(32),
+      margin: const pw.EdgeInsets.only(left: 32, top: 32, right: 32, bottom: 80),
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          _companyHeader(co),
+          pw.Image(headerImg, width: ctx.page.pageFormat.availableWidth),
           pw.SizedBox(height: 8),
           pw.Divider(thickness: 1),
           pw.SizedBox(height: 12),
@@ -307,53 +315,11 @@ class DocumentPdf {
 
           // Footer
           pw.Divider(thickness: 0.5),
-          _companyFooter(co),
+          pw.Image(footerImg, width: ctx.page.pageFormat.availableWidth),
         ],
       ),
     ));
 
     return pdf.save();
-  }
-
-  // ── Shared helpers ──────────────────────────────────
-
-  static pw.Widget _companyHeader(CompanyInfo co) {
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Expanded(child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            if (co.name.isNotEmpty)
-              pw.Text(co.name,
-                  style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-            if (co.address.isNotEmpty)
-              pw.Text(co.address, style: const pw.TextStyle(fontSize: 9)),
-            if (co.gstin.isNotEmpty)
-              pw.Text('GSTIN: ${co.gstin}', style: const pw.TextStyle(fontSize: 9)),
-            pw.SizedBox(height: 4),
-            if (co.phone.isNotEmpty)
-              pw.Text('Phone: ${co.phone}', style: const pw.TextStyle(fontSize: 9)),
-            if (co.email.isNotEmpty)
-              pw.Text('Email: ${co.email}', style: const pw.TextStyle(fontSize: 9)),
-            if (co.website.isNotEmpty)
-              pw.Text(co.website, style: const pw.TextStyle(fontSize: 9)),
-          ],
-        )),
-      ],
-    );
-  }
-
-  static pw.Widget _companyFooter(CompanyInfo co) {
-    final parts = <String>[];
-    if (co.name.isNotEmpty) parts.add(co.name);
-    if (co.phone.isNotEmpty) parts.add('Ph: ${co.phone}');
-    if (co.email.isNotEmpty) parts.add(co.email);
-    return pw.Center(
-      child: pw.Text(
-        parts.join('  |  '),
-        style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
-      ),
-    );
   }
 }

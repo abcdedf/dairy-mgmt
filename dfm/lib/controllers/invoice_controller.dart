@@ -30,14 +30,17 @@ class InvoiceLine {
   const InvoiceLine({required this.productId, required this.productName,
       required this.productUnit, required this.totalQty,
       required this.avgRate, required this.totalAmount});
-  factory InvoiceLine.fromJson(Map<String, dynamic> j) => InvoiceLine(
-    productId:   int.parse(j['product_id'].toString()),
-    productName: j['product_name']?.toString() ?? '',
-    productUnit: j['product_unit']?.toString() ?? '',
-    totalQty:    double.tryParse(j['total_qty']?.toString() ?? '') ?? 0,
-    avgRate:     double.tryParse(j['avg_rate']?.toString() ?? '') ?? 0,
-    totalAmount: double.tryParse(j['total_amount']?.toString() ?? '') ?? 0,
-  );
+  factory InvoiceLine.fromJson(Map<String, dynamic> j) {
+    debugPrint('[InvoiceLine] fromJson: ${j.keys.toList()} product_id=${j['product_id']} pouch_product_id=${j['pouch_product_id']}');
+    return InvoiceLine(
+      productId:   int.tryParse(j['product_id']?.toString() ?? '') ?? 0,
+      productName: j['product_name']?.toString() ?? '',
+      productUnit: j['product_unit']?.toString() ?? '',
+      totalQty:    double.tryParse(j['total_qty']?.toString() ?? '') ?? 0,
+      avgRate:     double.tryParse(j['avg_rate']?.toString() ?? '') ?? 0,
+      totalAmount: double.tryParse(j['total_amount']?.toString() ?? '') ?? 0,
+    );
+  }
 }
 
 class Invoice {
@@ -131,8 +134,17 @@ class InvoiceController extends GetxController {
           '/v4/invoices?location_id=$locId&payment_status=$status');
       isLoading.value = false;
       if (res.ok) {
-        invoices.value = (res.data['invoices'] as List)
-            .map((e) => Invoice.fromJson(e as Map<String, dynamic>)).toList();
+        debugPrint('[InvoiceController] raw invoices count: ${(res.data['invoices'] as List).length}');
+        final parsed = <Invoice>[];
+        for (final e in (res.data['invoices'] as List)) {
+          try {
+            parsed.add(Invoice.fromJson(e as Map<String, dynamic>));
+          } catch (parseErr, parseSt) {
+            debugPrint('[InvoiceController] parse error for invoice ${e['id']}: $parseErr\n$parseSt');
+            debugPrint('[InvoiceController] raw data: $e');
+          }
+        }
+        invoices.value = parsed;
         if (res.data['customers'] != null) {
           customers.value = (res.data['customers'] as List)
               .map((e) => ChallanCustomer.fromJson(e as Map<String, dynamic>)).toList();
@@ -143,7 +155,7 @@ class InvoiceController extends GetxController {
     } catch (e, st) {
       isLoading.value = false;
       errorMessage.value = 'Unexpected error loading invoices.';
-      if (kDebugMode) debugPrint('[InvoiceController] fetch error: $e\n$st');
+      debugPrint('[InvoiceController] fetch error: $e\n$st');
     }
   }
 

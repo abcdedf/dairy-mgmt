@@ -136,6 +136,18 @@ class ChallanPouchProduct {
   );
 }
 
+class CustomerPouchRate {
+  final int partyId;
+  final int pouchProductId;
+  final double crateRate;
+  const CustomerPouchRate({required this.partyId, required this.pouchProductId, required this.crateRate});
+  factory CustomerPouchRate.fromJson(Map<String, dynamic> j) => CustomerPouchRate(
+    partyId:        int.parse(j['party_id'].toString()),
+    pouchProductId: int.parse(j['pouch_product_id'].toString()),
+    crateRate:      double.tryParse(j['crate_rate']?.toString() ?? '0') ?? 0,
+  );
+}
+
 // ── Controller ────────────────────────────────────────────
 
 class ChallanController extends GetxController {
@@ -146,6 +158,7 @@ class ChallanController extends GetxController {
   final customers     = <ChallanCustomer>[].obs;
   final products      = <ChallanProduct>[].obs;
   final pouchProducts = <ChallanPouchProduct>[].obs;
+  final customerPouchRates = <CustomerPouchRate>[].obs;
   final statusFilter  = 'all'.obs;
   final reportLocId  = RxnInt();
 
@@ -196,6 +209,12 @@ class ChallanController extends GetxController {
               .map((e) => ChallanPouchProduct.fromJson(e as Map<String, dynamic>))
               .toList();
         }
+        if (res.data['customer_pouch_rates'] != null) {
+          customerPouchRates.value = (res.data['customer_pouch_rates'] as List)
+              .map((e) => CustomerPouchRate.fromJson(e as Map<String, dynamic>))
+              .toList();
+          debugPrint('[ChallanController] loaded ${customerPouchRates.length} customer pouch rates');
+        }
       } else {
         errorMessage.value = res.message ?? 'Failed to load challans.';
       }
@@ -204,6 +223,16 @@ class ChallanController extends GetxController {
       errorMessage.value = 'Unexpected error loading challans.';
       if (kDebugMode) debugPrint('[ChallanController] fetchChallans error: $e\n$st');
     }
+  }
+
+  /// Returns customer-specific rate if one exists, otherwise the global pouch product rate.
+  double rateForCustomerPouch(int partyId, int pouchProductId) {
+    final override = customerPouchRates.firstWhereOrNull(
+      (r) => r.partyId == partyId && r.pouchProductId == pouchProductId,
+    );
+    if (override != null) return override.crateRate;
+    final pp = pouchProducts.firstWhereOrNull((p) => p.id == pouchProductId);
+    return pp?.crateRate ?? 0;
   }
 
   Future<bool> saveChallan({

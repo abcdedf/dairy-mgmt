@@ -1,5 +1,6 @@
 // lib/controllers/pouch_type_controller.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import '../core/api_client.dart';
 import '../models/models.dart';
@@ -65,5 +66,45 @@ class PouchTypeController extends GetxController {
     }
     errorMessage.value = res.message ?? 'Failed to update.';
     return false;
+  }
+
+  // ── Customer pouch rates ──────────────────────────────
+
+  Future<List<Map<String, dynamic>>> fetchCustomerPouchRates(int pouchProductId) async {
+    debugPrint('[PouchTypeController] fetchCustomerPouchRates: ppId=$pouchProductId');
+    final res = await ApiClient.get('/customer-pouch-rates?pouch_product_id=$pouchProductId');
+    if (res.ok) {
+      final rows = List<Map<String, dynamic>>.from(res.data as List);
+      debugPrint('[PouchTypeController] got ${rows.length} customer rates');
+      return rows;
+    }
+    return [];
+  }
+
+  Future<bool> saveCustomerPouchRate(int partyId, int pouchProductId, double crateRate) async {
+    debugPrint('[PouchTypeController] saveCustomerPouchRate: party=$partyId pouch=$pouchProductId rate=$crateRate');
+    final res = await ApiClient.post('/customer-pouch-rates', {
+      'party_id': partyId,
+      'pouch_product_id': pouchProductId,
+      'crate_rate': crateRate,
+    });
+    return res.ok;
+  }
+
+  Future<bool> deleteCustomerPouchRate(int id) async {
+    debugPrint('[PouchTypeController] deleteCustomerPouchRate: id=$id');
+    final res = await ApiClient.delete('/customer-pouch-rates/$id');
+    return res.ok;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchCustomers() async {
+    final res = await ApiClient.get('/customers?all=1');
+    if (res.ok) {
+      return (res.data as List).map((e) => {
+        'id': int.parse(e['id'].toString()),
+        'name': e['name']?.toString() ?? '',
+      }).toList();
+    }
+    return [];
   }
 }
