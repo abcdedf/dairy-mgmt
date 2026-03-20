@@ -392,6 +392,7 @@ flutter build web --base-href /dairyapp/
 - Sales duplicate inserts fail silently at DB level due to UNIQUE constraint
 - Stock query window must be 30 days to get correct cumulative balance
 - `dairy_transaction_days` WP option controls transaction history (default 7, max 90)
+- **Flutter web asset images for PDFs** — `rootBundle.load()`, `networkImage()`, and HTTP fetch all fail on Flutter web (known Flutter bugs: [#158768](https://github.com/flutter/flutter/issues/158768), [#137523](https://github.com/flutter/flutter/issues/137523)). **Workaround:** embed PNG files as base64 constants in `lib/core/pdf_images.dart` and use `pw.MemoryImage()`. See `dfm/docs/adding-pdf-images.md` for the procedure to add/update images.
 
 
 ## Production Database Safety Rules
@@ -431,6 +432,11 @@ URL accessing the app on the web: https://www.nkp45fd.fanol.xyz/dairyapp/
 
 ## Source Control
 **CRITICAL: Claude works ONLY with the local copy. Do NOT run ANY git commands — no `git log`, `git status`, `git diff`, `git commit`, `git push`, `git pull`, `git checkout`, or any other git operation. Do NOT interact with any remote repository (GitHub, Bitbucket, or otherwise). The project owner manages ALL version control operations manually. This includes read-only git commands — do not use git to inspect history, check file status, or any other purpose.**
+
+## Tool Call Rules
+**CRITICAL: Never combine multiple independent tool calls into a single message when each requires user permission.** Each tool call should be a simple, single command so the user can approve or deny individually. Do not batch `git status`, `git log`, `git remote -v` etc. into one message — run them one at a time sequentially.
+
+**CRITICAL: Never construct compound shell commands** (using `&&`, `;`, or `|` to chain multiple commands). Each Bash tool call must be a single, simple command. Compound commands that get blocked by the user waste progress and force re-work. Keep it simple: one command per tool call.
 
 ## User credential for all testing
 See: /Users/abhayapat/git-repos/pem/dairy-mgmt-credentials.txt (outside source control)

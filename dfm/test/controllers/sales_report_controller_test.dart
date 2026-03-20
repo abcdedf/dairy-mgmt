@@ -27,23 +27,23 @@ void main() {
     test('fetchReport populates colOrder, prodNames, and rows', () async {
       fake.onGet('/sales-report', ApiResponse.success(statusCode: 200, data: {
         'col_order': [1, 2, 5],
-        'prod_names': {'1': 'FF Milk', '2': 'Skim Milk', '5': 'Ghee'},
+        'prod_names': <String, dynamic>{'1': 'FF Milk', '2': 'Skim Milk', '5': 'Ghee'},
         'rows': [
-          {
+          <String, dynamic>{
             'date': '2026-03-05',
-            'products': {
-              '1': {'qty_kg': '100', 'total_value': '4500.00'},
-              '2': {'qty_kg': '50', 'total_value': '2000.00'},
+            'products': <String, dynamic>{
+              '1': <String, dynamic>{'qty_kg': '100', 'total_value': '4500.00'},
+              '2': <String, dynamic>{'qty_kg': '50', 'total_value': '2000.00'},
               '5': null,
             },
             'row_total': '6500.00',
           },
-          {
+          <String, dynamic>{
             'date': '2026-03-06',
-            'products': {
-              '1': {'qty_kg': '80', 'total_value': '3600.00'},
+            'products': <String, dynamic>{
+              '1': <String, dynamic>{'qty_kg': '80', 'total_value': '3600.00'},
               '2': null,
-              '5': {'qty_kg': '10', 'total_value': '5000.00'},
+              '5': <String, dynamic>{'qty_kg': '10', 'total_value': '5000.00'},
             },
             'row_total': '8600.00',
           },
@@ -84,14 +84,14 @@ void main() {
       expect(ctrl.rows, isEmpty);
     });
 
-    test('fetchReport skips when no location selected', () async {
+    test('fetchReport still calls API when no location selected', () async {
       LocationService.instance.clear();
       fake.reset();
 
       fake.onGet('/sales-report', ApiResponse.success(statusCode: 200, data: {
-        'col_order': [],
-        'prod_names': {},
-        'rows': [],
+        'col_order': <dynamic>[],
+        'prod_names': <String, dynamic>{},
+        'rows': <dynamic>[],
       }));
 
       createController();
@@ -100,18 +100,18 @@ void main() {
 
       final reportCalls = fake.calls.where(
           (c) => c.method == 'GET' && c.path.startsWith('/sales-report'));
-      expect(reportCalls, isEmpty);
+      expect(reportCalls, isNotEmpty);
     });
 
     test('fetchReport re-runs when location changes', () async {
       fake.onGet('/sales-report', ApiResponse.success(statusCode: 200, data: {
         'col_order': [1],
-        'prod_names': {'1': 'FF Milk'},
+        'prod_names': <String, dynamic>{'1': 'FF Milk'},
         'rows': [
-          {
+          <String, dynamic>{
             'date': '2026-03-05',
-            'products': {
-              '1': {'qty_kg': '100', 'total_value': '4500.00'},
+            'products': <String, dynamic>{
+              '1': <String, dynamic>{'qty_kg': '100', 'total_value': '4500.00'},
             },
             'row_total': '4500.00',
           },

@@ -144,11 +144,23 @@ class _PouchTypeCard extends StatelessWidget {
           Text('\u20B9${pt.crateRate.toStringAsFixed(2)}',
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: kNavy)),
           IconButton(
+            icon: const Icon(Icons.people_outline, size: 18, color: kNavy),
+            tooltip: 'Customer Rates',
+            onPressed: () => _showCustomerRatesDialog(context),
+          ),
+          IconButton(
             icon: const Icon(Icons.edit_outlined, size: 18),
             onPressed: () => _showEditDialog(context),
           ),
         ]),
       ),
+    );
+  }
+
+  void _showCustomerRatesDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => _CustomerRatesDialog(ctrl: ctrl, pt: pt),
     );
   }
 
@@ -203,6 +215,182 @@ class _PouchTypeCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Customer Rates Dialog ─────────────────────────────────
+
+class _CustomerRatesDialog extends StatefulWidget {
+  final PouchTypeController ctrl;
+  final PouchType pt;
+  const _CustomerRatesDialog({required this.ctrl, required this.pt});
+
+  @override
+  State<_CustomerRatesDialog> createState() => _CustomerRatesDialogState();
+}
+
+class _CustomerRatesDialogState extends State<_CustomerRatesDialog> {
+  List<Map<String, dynamic>> _rates = [];
+  List<Map<String, dynamic>> _customers = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final results = await Future.wait([
+      widget.ctrl.fetchCustomerPouchRates(widget.pt.id),
+      widget.ctrl.fetchCustomers(),
+    ]);
+    if (mounted) {
+      setState(() {
+        _rates = results[0];
+        _customers = results[1];
+        _loading = false;
+      });
+    }
+  }
+
+  void _showAddEdit({Map<String, dynamic>? existing}) {
+    final rateCtrl = TextEditingController(
+        text: existing != null ? double.tryParse(existing['crate_rate'].toString())?.toStringAsFixed(2) ?? '' : '');
+    int? selectedPartyId = existing != null ? int.tryParse(existing['party_id'].toString()) : null;
+
+    // Filter out customers that already have a rate (unless editing that one)
+    final usedPartyIds = _rates
+        .where((r) => existing == null || r['id'].toString() != existing['id'].toString())
+        .map((r) => int.tryParse(r['party_id'].toString()) ?? 0)
+        .toSet();
+    final availableCustomers = _customers
+        .where((c) => !usedPartyIds.contains(c['id']) || c['id'] == selectedPartyId)
+        .toList();
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Text(existing != null ? 'Edit Rate' : 'Add Customer Rate',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (existing == null)
+              DropdownButtonFormField<int>(
+                value: selectedPartyId,
+                decoration: fieldDec('Customer'),
+                isExpanded: true,
+                items: availableCustomers.map((c) => DropdownMenuItem(
+                    value: c['id'] as int,
+                    child: Text(c['name'].toString(), overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: (v) => setDialogState(() => selectedPartyId = v),
+              )
+            else
+              Text('Customer: ${existing['party_name']}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: rateCtrl,
+              decoration: fieldDec('Crate Rate', suffix: 'INR'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: kNavy, foregroundColor: Colors.white),
+              onPressed: () async {
+                final rate = double.tryParse(rateCtrl.text) ?? 0;
+                if (selectedPartyId == null || rate <= 0) return;
+                final ok = await widget.ctrl.saveCustomerPouchRate(
+                    selectedPartyId!, widget.pt.id, rate);
+                if (ok && context.mounted) {
+                  Navigator.pop(context);
+                  _load();
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _delete(Map<String, dynamic> rate) async {
+    final id = int.tryParse(rate['id'].toString());
+    if (id == null) return;
+    final ok = await widget.ctrl.deleteCustomerPouchRate(id);
+    if (ok) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Customer Rates: ${widget.pt.name}',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+        const SizedBox(height: 4),
+        Text('Default: \u20B9${widget.pt.crateRate.toStringAsFixed(2)}/crate',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+      ]),
+      content: SizedBox(
+        width: 360,
+        child: _loading
+            ? const SizedBox(height: 80, child: LoadingCenter())
+            : Column(mainAxisSize: MainAxisSize.min, children: [
+                if (_rates.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Text('All customers use the default rate.',
+                        style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                  )
+                else
+                  ...List.generate(_rates.length, (i) {
+                    final r = _rates[i];
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(r['party_name']?.toString() ?? '',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text('\u20B9${double.tryParse(r['crate_rate'].toString())?.toStringAsFixed(2) ?? r['crate_rate']}',
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: kNavy)),
+                        const SizedBox(width: 4),
+                        InkWell(
+                          onTap: () => _showAddEdit(existing: r),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.edit_outlined, size: 16),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _delete(r),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(Icons.delete_outline, size: 16, color: kRed),
+                          ),
+                        ),
+                      ]),
+                    );
+                  }),
+                const Divider(),
+                TextButton.icon(
+                  onPressed: () => _showAddEdit(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Add Customer Rate', style: TextStyle(fontSize: 13)),
+                  style: TextButton.styleFrom(foregroundColor: kNavy),
+                ),
+              ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+      ],
     );
   }
 }

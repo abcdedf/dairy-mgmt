@@ -22,20 +22,24 @@ void main() {
   /// Helper: register canned vendor + stock + flows + pouch-types responses
   /// so onInit completes.
   void stubDefaults() {
-    fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: [
-      {'id': '10', 'name': 'Vendor A'},
-      {'id': '20', 'name': 'Vendor B'},
+    fake.onGet('/v4/parties', ApiResponse.success(statusCode: 200, data: [
+      {'id': '10', 'name': 'Vendor A', 'party_type': 'vendor', 'is_active': '1'},
+      {'id': '20', 'name': 'Vendor B', 'party_type': 'vendor', 'is_active': '1'},
     ]));
-    fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+    fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
       'dates': <dynamic>[],
     }));
+    fake.onGet('/v4/transactions', ApiResponse.success(statusCode: 200, data: {
+      'rows': <dynamic>[],
+    }));
+    fake.onGet('/v4/milk-availability', ApiResponse.success(statusCode: 200, data: []));
     fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: [
       {'key': 'ff_milk_purchase', 'label': 'FF Milk Purchase', 'sort_order': '1'},
       {'key': 'ff_milk_processing', 'label': 'FF Milk Processing', 'sort_order': '2'},
       {'key': 'curd_production', 'label': 'FF Milk -> Cream + Curd', 'sort_order': '10'},
       {'key': 'madhusudan_sale', 'label': 'FF Milk -> Madhusudan', 'sort_order': '11'},
     ]));
-    fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: [
+    fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: [
       {'id': '1', 'name': '500ml', 'milk_per_pouch': '0.50', 'pouches_per_crate': '20', 'is_active': '1'},
     ]));
   }
@@ -60,10 +64,12 @@ void main() {
     });
 
     test('onInit fetches stock badges', () async {
-      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/parties', ApiResponse.success(statusCode: 200, data: []));
       fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/transactions', ApiResponse.success(statusCode: 200, data: {'rows': <dynamic>[]}));
+      fake.onGet('/v4/milk-availability', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': [
           {
             'date': '2026-03-04',
@@ -80,7 +86,7 @@ void main() {
       expect(ctrl.stockSkimMilk.value, 200);
       expect(ctrl.stockCream.value, 50);
       expect(ctrl.stockButter.value, 30);
-      expect(ctrl.stockDahi.value, 10);
+      // stockDahi was removed; Dahi (product 6) is no longer a stock badge
     });
 
     test('save() posts FF Milk Purchase and clears fields on success', () async {
@@ -89,7 +95,7 @@ void main() {
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
 
-      fake.onPost('/milk-cream', ApiResponse.success(statusCode: 201, data: {'id': 42}));
+      fake.onPost('/v4/transaction', ApiResponse.success(statusCode: 201, data: {'id': 42}));
 
       // Fill required fields for FF Milk Purchase
       ctrl.ffMilkCtrl.text = '500';
@@ -113,23 +119,25 @@ void main() {
       await Future.delayed(Duration.zero);
 
       // Stub a failure for the POST
-      fake.onPost('/milk-cream', ApiResponse.error(
+      fake.onPost('/v4/transaction', ApiResponse.error(
         statusCode: 422,
         message: 'Validation failed.',
       ));
 
       // The real save() requires formKey validation which needs a widget tree.
       // We verify error propagation by calling the API directly.
-      final res = await ApiClient.post('/milk-cream', {'test': true});
+      final res = await ApiClient.post('/v4/transaction', {'test': true});
       expect(res.ok, false);
       expect(res.message, 'Validation failed.');
     });
 
     test('vendor loading sets isVendorLoading correctly', () async {
-      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/parties', ApiResponse.success(statusCode: 200, data: []));
       fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/transactions', ApiResponse.success(statusCode: 200, data: {'rows': <dynamic>[]}));
+      fake.onGet('/v4/milk-availability', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': <dynamic>[],
       }));
       createController();
@@ -144,12 +152,14 @@ void main() {
     });
 
     test('stock nulls out when no dates returned', () async {
-      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/parties', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': <dynamic>[],
       }));
       fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/transactions', ApiResponse.success(statusCode: 200, data: {'rows': <dynamic>[]}));
+      fake.onGet('/v4/milk-availability', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: []));
       createController();
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
@@ -160,10 +170,12 @@ void main() {
     });
 
     test('stockCurd is populated from stock response (product_id 10)', () async {
-      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/parties', ApiResponse.success(statusCode: 200, data: []));
       fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/transactions', ApiResponse.success(statusCode: 200, data: {'rows': <dynamic>[]}));
+      fake.onGet('/v4/milk-availability', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': [
           {
             'date': '2026-03-04',
@@ -180,10 +192,12 @@ void main() {
     });
 
     test('stockCurd is null when no dates returned', () async {
-      fake.onGet('/vendors', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/parties', ApiResponse.success(statusCode: 200, data: []));
       fake.onGet('/production-flows', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: []));
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/transactions', ApiResponse.success(statusCode: 200, data: {'rows': <dynamic>[]}));
+      fake.onGet('/v4/milk-availability', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'dates': <dynamic>[],
       }));
       createController();

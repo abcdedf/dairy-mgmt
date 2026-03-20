@@ -57,7 +57,7 @@ void main() {
     );
 
     test('second controller instance sees updated data', () async {
-      fake.onGet('/stock', _stockResponse(100));
+      fake.onGet('/v4/stock', _stockResponse(100));
       final ctrl1 = Get.put(StockController());
       await _settle();
       expect(ctrl1.stockDays.isNotEmpty, true);
@@ -65,7 +65,7 @@ void main() {
 
       // Simulate page revisit: delete + recreate with new data
       Get.delete<StockController>(force: true);
-      fake.onGet('/stock', _stockResponse(250));
+      fake.onGet('/v4/stock', _stockResponse(250));
       final ctrl2 = Get.put(StockController());
       await _settle();
       expect(ctrl2.stockDays.last.stocks[1], 250);
@@ -75,13 +75,13 @@ void main() {
   // ── Funds Report ───────────────────────────────────────────
 
   group('FundsReportController refreshes on recreate', () {
-    ApiResponse _fundsResponse(double totalSales) => ApiResponse.success(
+    ApiResponse _fundsResponse(double salesTotal) => ApiResponse.success(
       statusCode: 200,
       data: {
-        'total_sales': totalSales,
-        'total_stock_value': 0,
-        'total_vendor_dues': 0,
-        'free_cash': totalSales,
+        'sales_total': salesTotal,
+        'stock_value': 0,
+        'vendor_due': 0,
+        'free_cash': salesTotal,
       },
     );
 
@@ -89,13 +89,13 @@ void main() {
       fake.onGet('/funds-report', _fundsResponse(1000.0));
       final ctrl1 = Get.put(FundsReportController());
       await _settle();
-      expect(ctrl1.report.value, isNotNull);
+      expect(ctrl1.salesTotal.value, 1000.0);
 
       Get.delete<FundsReportController>(force: true);
       fake.onGet('/funds-report', _fundsResponse(5000.0));
       final ctrl2 = Get.put(FundsReportController());
       await _settle();
-      expect(ctrl2.report.value, isNotNull);
+      expect(ctrl2.salesTotal.value, 5000.0);
       // Verify it fetched twice (once per creation)
       final fundsCalls = fake.calls.where((c) => c.path.startsWith('/funds-report')).toList();
       expect(fundsCalls.length, 2);
@@ -106,28 +106,52 @@ void main() {
 
   group('StockValuationController refreshes on recreate', () {
     test('second controller instance fetches again', () async {
-      fake.onGet('/stock-valuation', ApiResponse.success(
+      fake.onGet('/estimated-rates', ApiResponse.success(
         statusCode: 200,
         data: [
-          {'product_id': '1', 'product_name': 'FF Milk', 'stock': '100', 'rate': '50.00', 'value': '5000.00'},
+          {'product_id': '1', 'product_name': 'FF Milk', 'rate': '50.00'},
         ],
+      ));
+      fake.onGet('/stock-valuation', ApiResponse.success(
+        statusCode: 200,
+        data: {
+          'products': [
+            {'id': '1', 'name': 'FF Milk', 'unit': 'KG'},
+          ],
+          'dates': [
+            {'date': '2026-03-11', 'stocks': {'1': 100}},
+          ],
+        },
       ));
 
       final ctrl1 = Get.put(StockValuationController());
       await _settle();
-      expect(ctrl1.rows.length, 1);
+      expect(ctrl1.stockDays.length, 1);
 
       Get.delete<StockValuationController>(force: true);
-      fake.onGet('/stock-valuation', ApiResponse.success(
+      fake.onGet('/estimated-rates', ApiResponse.success(
         statusCode: 200,
         data: [
-          {'product_id': '1', 'product_name': 'FF Milk', 'stock': '200', 'rate': '50.00', 'value': '10000.00'},
-          {'product_id': '2', 'product_name': 'Skim Milk', 'stock': '50', 'rate': '30.00', 'value': '1500.00'},
+          {'product_id': '1', 'product_name': 'FF Milk', 'rate': '50.00'},
+          {'product_id': '2', 'product_name': 'Skim Milk', 'rate': '30.00'},
         ],
+      ));
+      fake.onGet('/stock-valuation', ApiResponse.success(
+        statusCode: 200,
+        data: {
+          'products': [
+            {'id': '1', 'name': 'FF Milk', 'unit': 'KG'},
+            {'id': '2', 'name': 'Skim Milk', 'unit': 'KG'},
+          ],
+          'dates': [
+            {'date': '2026-03-11', 'stocks': {'1': 200, '2': 50}},
+            {'date': '2026-03-10', 'stocks': {'1': 150, '2': 40}},
+          ],
+        },
       ));
       final ctrl2 = Get.put(StockValuationController());
       await _settle();
-      expect(ctrl2.rows.length, 2);
+      expect(ctrl2.stockDays.length, 2);
     });
   });
 
@@ -138,29 +162,36 @@ void main() {
       fake.onGet('/vendor-ledger', ApiResponse.success(
         statusCode: 200,
         data: {
+          'rows': [
+            {'date': '2026-03-10', 'location_name': 'Test', 'vendor_name': 'V1', 'purchases': '1000.00', 'payments': '500.00', 'balance': '500.00'},
+          ],
           'vendors': [
-            {'vendor_id': '1', 'vendor_name': 'V1', 'total_purchases': '1000.00', 'total_payments': '500.00', 'balance': '500.00'},
+            {'id': '1', 'name': 'V1'},
           ],
         },
       ));
 
       final ctrl1 = Get.put(VendorLedgerController());
       await _settle();
-      expect(ctrl1.vendors.length, 1);
+      expect(ctrl1.rows.length, 1);
 
       Get.delete<VendorLedgerController>(force: true);
       fake.onGet('/vendor-ledger', ApiResponse.success(
         statusCode: 200,
         data: {
+          'rows': [
+            {'date': '2026-03-10', 'location_name': 'Test', 'vendor_name': 'V1', 'purchases': '2000.00', 'payments': '500.00', 'balance': '1500.00'},
+            {'date': '2026-03-10', 'location_name': 'Test', 'vendor_name': 'V2', 'purchases': '500.00', 'payments': '0.00', 'balance': '500.00'},
+          ],
           'vendors': [
-            {'vendor_id': '1', 'vendor_name': 'V1', 'total_purchases': '2000.00', 'total_payments': '500.00', 'balance': '1500.00'},
-            {'vendor_id': '2', 'vendor_name': 'V2', 'total_purchases': '500.00', 'total_payments': '0.00', 'balance': '500.00'},
+            {'id': '1', 'name': 'V1'},
+            {'id': '2', 'name': 'V2'},
           ],
         },
       ));
       final ctrl2 = Get.put(VendorLedgerController());
       await _settle();
-      expect(ctrl2.vendors.length, 2);
+      expect(ctrl2.rows.length, 2);
     });
   });
 
@@ -190,7 +221,7 @@ void main() {
 
   group('PouchTypeController refreshes on recreate', () {
     test('second controller instance sees newly added types', () async {
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: [
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: [
         {'id': '1', 'name': '500ml', 'milk_per_pouch': '0.50', 'pouches_per_crate': '20', 'is_active': '1'},
       ]));
 
@@ -199,7 +230,7 @@ void main() {
       expect(ctrl1.pouchTypes.length, 1);
 
       Get.delete<PouchTypeController>(force: true);
-      fake.onGet('/pouch-types', ApiResponse.success(statusCode: 200, data: [
+      fake.onGet('/pouch-products', ApiResponse.success(statusCode: 200, data: [
         {'id': '1', 'name': '500ml', 'milk_per_pouch': '0.50', 'pouches_per_crate': '20', 'is_active': '1'},
         {'id': '2', 'name': '1L', 'milk_per_pouch': '1.00', 'pouches_per_crate': '12', 'is_active': '1'},
       ]));
@@ -272,8 +303,9 @@ void main() {
   group('SalesReportController refreshes on recreate', () {
     test('second controller instance fetches again', () async {
       fake.onGet('/sales-report', ApiResponse.success(statusCode: 200, data: {
-        'rows': [],
-        'products': [],
+        'col_order': <dynamic>[],
+        'prod_names': <String, dynamic>{},
+        'rows': <dynamic>[],
       }));
 
       final ctrl1 = Get.put(SalesReportController());
@@ -292,7 +324,11 @@ void main() {
 
   group('VendorPurchaseReportController refreshes on recreate', () {
     test('second controller instance fetches again', () async {
-      fake.onGet('/vendor-purchase-report', ApiResponse.success(statusCode: 200, data: []));
+      fake.onGet('/vendor-purchase-report', ApiResponse.success(statusCode: 200, data: {
+        'rows': <dynamic>[],
+        'total_qty': '0',
+        'total_amount': '0',
+      }));
 
       final ctrl1 = Get.put(VendorPurchaseReportController());
       await _settle();

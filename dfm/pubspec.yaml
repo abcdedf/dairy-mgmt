@@ -30,3 +30,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # These images are NOT loaded via rootBundle (Flutter web bug).
+  # They are base64-embedded in lib/core/pdf_images.dart instead.
+  # See docs/adding-pdf-images.md for details.
+  assets:
+    - assets/images/challan_header.png
+    - assets/images/challan_footer.png
+    - assets/images/invoice_header.png
+    - assets/images/invoice_footer.png

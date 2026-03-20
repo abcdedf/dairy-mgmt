@@ -82,7 +82,7 @@ void main() {
       expect(ctrl.rows, isEmpty);
     });
 
-    test('fetchReport skips when no location selected', () async {
+    test('fetchReport calls API without location_id when no location selected', () async {
       LocationService.instance.clear();
       fake.reset();
 
@@ -96,9 +96,12 @@ void main() {
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
 
+      // Controller now calls API even without a location (no location_id param)
       final reportCalls = fake.calls.where(
           (c) => c.method == 'GET' && c.path.startsWith('/vendor-purchase-report'));
-      expect(reportCalls, isEmpty);
+      expect(reportCalls.length, 1);
+      // Should not have a location_id query param
+      expect(reportCalls.first.path, '/vendor-purchase-report');
     });
 
     test('fetchReport re-runs when location changes', () async {

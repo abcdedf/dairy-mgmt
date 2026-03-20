@@ -19,20 +19,56 @@ class SalesPage extends StatelessWidget {
         }
         return ColoredBox(
           color: const Color(0xFFF5F7FA),
-          child: Column(children: [
-            Expanded(child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: LayoutBuilder(builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 700;
+            debugPrint('[SalesPage] build: isWide=$isWide width=${constraints.maxWidth}');
+
+            if (isWide) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Header(ctrl: ctrl),
-                  _EntryForm(ctrl: ctrl),
-                  const Divider(height: 1, thickness: 1),
-                  _SavedEntries(ctrl: ctrl),
+                  // Left panel: form
+                  Expanded(child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _Header(ctrl: ctrl),
+                        _EntryForm(ctrl: ctrl),
+                      ],
+                    ),
+                  )),
+                  // Right panel: saved entries + footer
+                  Expanded(child: Column(children: [
+                    Expanded(child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _SavedEntries(ctrl: ctrl),
+                        ],
+                      ),
+                    )),
+                    _DayTotalFooter(ctrl: ctrl),
+                  ])),
                 ],
-              ),
-            )),
-            _DayTotalFooter(ctrl: ctrl),
-          ]),
+              );
+            }
+
+            // Narrow: stacked layout (original)
+            return Column(children: [
+              Expanded(child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Header(ctrl: ctrl),
+                    _EntryForm(ctrl: ctrl),
+                    const Divider(height: 1, thickness: 1),
+                    _SavedEntries(ctrl: ctrl),
+                  ],
+                ),
+              )),
+              _DayTotalFooter(ctrl: ctrl),
+            ]);
+          }),
         );
       },
     );

@@ -115,9 +115,10 @@ void main() {
 
       final callsBefore = fake.calls.length;
 
-      // Change location
+      // Change to another TEST-coded location so _effectiveLocId() returns its id
+      // (non-TEST locations use reportLocId which gets reset to null on change)
       LocationService.instance.selected.value =
-          const DairyLocation(id: 2, name: 'Plant B', code: 'PLB');
+          const DairyLocation(id: 2, name: 'Test 2', code: 'TEST');
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);

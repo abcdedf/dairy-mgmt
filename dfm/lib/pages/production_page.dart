@@ -32,136 +32,160 @@ class _ProductionBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return Obx(() {
       if (ctrl.isVendorLoading.value) return const LoadingCenter();
-      return Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+
+      // ── Form panel (date, activity type, fields, save) ──
+      Widget formPanel() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Date + Data type on one row
+          DCard(child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-
-              // ── Date + Data type on one row ──────────────────
-              DCard(child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Date picker
-                  Expanded(
-                    flex: 2,
-                    child: Obx(() => InkWell(
-                      onTap: () => ctrl.pickDate(context),
-                      child: InputDecorator(
-                        decoration: fieldDec('Date',
-                            prefixIcon: Icons.calendar_today_outlined),
-                        child: Text(
-                          DateFormat('dd MMM yyyy').format(ctrl.entryDate.value),
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    )),
+              Expanded(
+                flex: 2,
+                child: Obx(() => InkWell(
+                  onTap: () => ctrl.pickDate(context),
+                  child: InputDecorator(
+                    decoration: fieldDec('Date',
+                        prefixIcon: Icons.calendar_today_outlined),
+                    child: Text(
+                      DateFormat('dd MMM yyyy').format(ctrl.entryDate.value),
+                      style: const TextStyle(fontSize: 14),
+                    ),
                   ),
-                  const SizedBox(width: 12),
-                  // Data type dropdown
-                  Expanded(
-                    flex: 3,
-                    child: Obx(() {
-                      final flows = ctrl.flowDefs;
-                      if (flows.isEmpty) {
-                        return DropdownButtonFormField<DataEntry>(
-                          initialValue: ctrl.selectedEntry.value,
-                          isExpanded: true,
-                          decoration: fieldDec('Activity',
-                              prefixIcon: Icons.edit_note_outlined),
-                          items: DataEntry.values.map((e) => DropdownMenuItem(
-                            value: e,
-                            child: Text(e.label,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13)),
-                          )).toList(),
-                          onChanged: (v) {
-                            if (v != null) ctrl.selectedEntry.value = v;
-                          },
-                        );
-                      }
-                      return DropdownButtonFormField<DataEntry>(
-                        initialValue: ctrl.selectedEntry.value,
-                        isExpanded: true,
-                        decoration: fieldDec('Activity',
-                            prefixIcon: Icons.edit_note_outlined),
-                        items: flows.map((f) => DropdownMenuItem(
-                          value: f.entry,
-                          child: Text(f.label,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13)),
-                        )).toList(),
-                        onChanged: (v) {
-                          if (v != null) ctrl.selectedEntry.value = v;
-                        },
-                      );
-                    }),
-                  ),
-                ],
-              )),
-
-              const SizedBox(height: 10),
-
-              // ── Active form ──────────────────────────────────
-              Obx(() {
-                final entry = ctrl.selectedEntry.value;
-                return _EntryForm(ctrl: ctrl, entry: entry);
-              }),
-
-              const SizedBox(height: 10),
-
-              // ── Feedback ─────────────────────────────────────
-              Obx(() {
-                if (ctrl.errorMessage.value.isNotEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: FeedbackBanner(
-                        ctrl.errorMessage.value, isError: true),
+                )),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 3,
+                child: Obx(() {
+                  final flows = ctrl.flowDefs;
+                  if (flows.isEmpty) {
+                    return DropdownButtonFormField<DataEntry>(
+                      initialValue: ctrl.selectedEntry.value,
+                      isExpanded: true,
+                      decoration: fieldDec('Activity',
+                          prefixIcon: Icons.edit_note_outlined),
+                      items: DataEntry.values.map((e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e.label,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13)),
+                      )).toList(),
+                      onChanged: (v) {
+                        if (v != null) ctrl.selectedEntry.value = v;
+                      },
+                    );
+                  }
+                  return DropdownButtonFormField<DataEntry>(
+                    initialValue: ctrl.selectedEntry.value,
+                    isExpanded: true,
+                    decoration: fieldDec('Activity',
+                        prefixIcon: Icons.edit_note_outlined),
+                    items: flows.map((f) => DropdownMenuItem(
+                      value: f.entry,
+                      child: Text(f.label,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13)),
+                    )).toList(),
+                    onChanged: (v) {
+                      if (v != null) ctrl.selectedEntry.value = v;
+                    },
                   );
-                }
-                return const SizedBox.shrink();
-              }),
-
-              // ── Save button ──────────────────────────────────
-              Obx(() => ElevatedButton.icon(
-                onPressed: ctrl.isLoading.value ? null : ctrl.save,
-                icon: ctrl.isLoading.value
-                    ? const SizedBox(
-                        width: 18, height: 18,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Icon(Icons.save_outlined),
-                label: Text(
-                  ctrl.isLoading.value ? 'Saving…' : 'Save',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kNavy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  disabledBackgroundColor: kNavy.withValues(alpha: 0.5),
-                ),
-              )),
-
-              const SizedBox(height: 16),
-
-              // ── Saved entries for this date + flow ───────────
-              _SavedEntries(ctrl: ctrl),
-
-              const SizedBox(height: 32),
+                }),
+              ),
             ],
+          )),
+          const SizedBox(height: 10),
+
+          // Active form
+          Obx(() {
+            final entry = ctrl.selectedEntry.value;
+            return _EntryForm(ctrl: ctrl, entry: entry);
+          }),
+          const SizedBox(height: 10),
+
+          // Feedback
+          Obx(() {
+            if (ctrl.errorMessage.value.isNotEmpty) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: FeedbackBanner(
+                    ctrl.errorMessage.value, isError: true),
+              );
+            }
+            return const SizedBox.shrink();
+          }),
+
+          // Save button
+          Obx(() => ElevatedButton.icon(
+            onPressed: ctrl.isLoading.value ? null : ctrl.save,
+            icon: ctrl.isLoading.value
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.save_outlined),
+            label: Text(
+              ctrl.isLoading.value ? 'Saving…' : 'Save',
+              style: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kNavy,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              disabledBackgroundColor: kNavy.withValues(alpha: 0.5),
+            ),
+          )),
+        ],
+      );
+
+      // ── Activity panel (saved entries for last 7 days) ──
+      Widget activityPanel() => _SavedEntries(ctrl: ctrl);
+
+      // ── Responsive layout ──
+      return LayoutBuilder(builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 700;
+        debugPrint('[ProductionPage] build: isWide=$isWide width=${constraints.maxWidth}');
+
+        if (isWide) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: formPanel(),
+                )),
+                Expanded(child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: activityPanel(),
+                )),
+              ],
+            ),
+          );
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                formPanel(),
+                const SizedBox(height: 16),
+                activityPanel(),
+                const SizedBox(height: 32),
+              ],
+            ),
           ),
-        ),
-        ),
         );
       });
+    });
   }
 }
 

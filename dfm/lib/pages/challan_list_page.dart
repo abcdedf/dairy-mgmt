@@ -151,114 +151,89 @@ class _ChallanListPageState extends State<ChallanListPage> {
               message: 'No challans found.',
             );
           }
+          // Sort descending by date
+          final sorted = List<Challan>.from(ctrl.challans)
+            ..sort((a, b) => b.challanDate.compareTo(a.challanDate));
+          debugPrint('[ChallanList] ${sorted.length} challans, sorted desc by date');
+
           return RefreshIndicator(
             onRefresh: ctrl.fetchChallans,
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
-              itemCount: ctrl.challans.length,
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(0, 0, 0, 80),
+              itemCount: sorted.length,
+              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
               itemBuilder: (_, i) {
-                final ch = ctrl.challans[i];
+                final ch = sorted[i];
                 final dateStr = _tryFormatDate(ch.challanDate, dateFmt);
                 final totalStr = inrFmt.format(ch.total);
-                final lineCount = ch.lines.length;
-                final totalQty = ch.lines.fold<double>(0, (s, l) => s + l.qty);
+                final addr = ch.deliveryAddress ?? ch.shippingAddressSnapshot ?? '';
 
-                return Card(
-                  elevation: 1,
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: ch.isPending ? () => _openForm(existing: ch) : null,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Text('DC-${ch.challanNumber}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700, fontSize: 14)),
-                            const SizedBox(width: 8),
-                            _StatusBadge(status: ch.status),
-                            const Spacer(),
-                            Text(dateStr,
-                                style: TextStyle(fontSize: 12,
-                                    color: Colors.grey.shade600)),
-                          ]),
-                          const SizedBox(height: 6),
-                          Text(ch.partyName,
-                              style: const TextStyle(
-                                  fontSize: 13, fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 4),
-                          Row(children: [
-                            Icon(Icons.inventory_2_outlined,
-                                size: 14, color: Colors.grey.shade500),
+                return InkWell(
+                  onTap: ch.isPending ? () => _openForm(existing: ch) : null,
+                  child: Container(
+                    color: i.isEven ? Colors.white : const Color(0xFFF8F9FA),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        // Date
+                        SizedBox(width: 80, child: Text(dateStr,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                        // DC number + status
+                        SizedBox(width: 90, child: Row(children: [
+                          Text('DC-${ch.challanNumber}',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          const SizedBox(width: 4),
+                          _StatusDot(status: ch.status),
+                        ])),
+                        // Customer
+                        Expanded(flex: 2, child: Text(ch.partyName,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
+                        // Shipping address
+                        Expanded(flex: 3, child: Row(children: [
+                          if (addr.isNotEmpty) ...[
+                            Icon(Icons.local_shipping_outlined, size: 12, color: Colors.grey.shade500),
                             const SizedBox(width: 4),
-                            Text('$lineCount product${lineCount == 1 ? '' : 's'}, '
-                                '${totalQty.toInt()} pcs',
-                                style: TextStyle(fontSize: 12,
-                                    color: Colors.grey.shade600)),
-                            const Spacer(),
-                            Text('\u20B9$totalStr',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700, fontSize: 14,
-                                    color: _kTeal)),
-                          ]),
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // PDF button
-                                InkWell(
-                                  onTap: () => DocumentPdf.showChallanPdf(ch),
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: const Padding(
-                                    padding: EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.picture_as_pdf_outlined,
-                                            size: 14, color: _kTeal),
-                                        SizedBox(width: 4),
-                                        Text('PDF',
-                                            style: TextStyle(
-                                                fontSize: 12, color: _kTeal)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                if (ch.isPending) ...[
-                                  const SizedBox(width: 8),
-                                  InkWell(
-                                    onTap: () => _confirmDelete(ch),
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 4),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.delete_outline,
-                                              size: 14, color: kRed),
-                                          const SizedBox(width: 4),
-                                          Text('Delete',
-                                              style: TextStyle(
-                                                  fontSize: 12, color: kRed)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
+                          ],
+                          Expanded(child: Text(addr,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600))),
+                        ])),
+                        // Total
+                        SizedBox(width: 90, child: Text('\u20B9$totalStr',
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kTeal))),
+                        // Actions
+                        SizedBox(width: ch.isPending ? 100 : 36, child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            if (ch.isPending) InkWell(
+                              onTap: () => _openForm(existing: ch),
+                              borderRadius: BorderRadius.circular(4),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.edit_outlined, size: 16, color: _kTeal),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                            InkWell(
+                              onTap: () => DocumentPdf.showChallanPdf(ch),
+                              borderRadius: BorderRadius.circular(4),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.picture_as_pdf_outlined, size: 16, color: _kTeal),
+                              ),
+                            ),
+                            if (ch.isPending) InkWell(
+                              onTap: () => _confirmDelete(ch),
+                              borderRadius: BorderRadius.circular(4),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(Icons.delete_outline, size: 16, color: kRed),
+                              ),
+                            ),
+                          ],
+                        )),
+                      ],
                     ),
                   ),
                 );
@@ -275,25 +250,20 @@ class _ChallanListPageState extends State<ChallanListPage> {
   }
 }
 
-class _StatusBadge extends StatelessWidget {
+class _StatusDot extends StatelessWidget {
   final String status;
-  const _StatusBadge({required this.status});
+  const _StatusDot({required this.status});
 
   @override
   Widget build(BuildContext context) {
     final isPending = status == 'pending';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: (isPending ? Colors.orange : kGreen).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        status.toUpperCase(),
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: isPending ? Colors.orange.shade800 : kGreen,
+    return Tooltip(
+      message: status.toUpperCase(),
+      child: Container(
+        width: 8, height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isPending ? Colors.orange : kGreen,
         ),
       ),
     );

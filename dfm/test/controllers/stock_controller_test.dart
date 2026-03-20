@@ -25,7 +25,7 @@ void main() {
 
   group('StockController', () {
     test('fetchStock populates products and stockDays', () async {
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'products': [
           {'id': '1', 'name': 'FF Milk', 'unit': 'KG'},
           {'id': '2', 'name': 'Skim Milk', 'unit': 'KG'},
@@ -62,7 +62,7 @@ void main() {
     });
 
     test('fetchStock sets errorMessage on failure', () async {
-      fake.onGet('/stock', ApiResponse.error(
+      fake.onGet('/v4/stock', ApiResponse.error(
         statusCode: 500,
         message: 'Database error.',
       ));
@@ -81,7 +81,7 @@ void main() {
       LocationService.instance.clear();
       fake.reset();
 
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'products': [],
         'dates': [],
       }));
@@ -90,14 +90,14 @@ void main() {
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
 
-      // Should not have made any GET /stock calls (locId is null)
+      // Should not have made any GET /v4/stock calls (locId is null)
       final stockCalls = fake.calls.where(
-          (c) => c.method == 'GET' && c.path.startsWith('/stock'));
+          (c) => c.method == 'GET' && c.path.startsWith('/v4/stock'));
       expect(stockCalls, isEmpty);
     });
 
     test('fetchStock re-runs when location changes', () async {
-      fake.onGet('/stock', ApiResponse.success(statusCode: 200, data: {
+      fake.onGet('/v4/stock', ApiResponse.success(statusCode: 200, data: {
         'products': [
           {'id': '1', 'name': 'FF Milk', 'unit': 'KG'},
         ],
@@ -123,10 +123,10 @@ void main() {
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
 
-      // Should have made additional GET /stock call
+      // Should have made additional GET /v4/stock call
       expect(fake.calls.length, greaterThan(callsBefore));
       final stockCalls = fake.calls.where(
-          (c) => c.method == 'GET' && c.path.startsWith('/stock'));
+          (c) => c.method == 'GET' && c.path.startsWith('/v4/stock'));
       expect(stockCalls.length, greaterThanOrEqualTo(2));
     });
   });
